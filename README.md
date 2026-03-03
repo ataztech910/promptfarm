@@ -1,4 +1,8 @@
 # PromptFarm 🌾
+![License](https://img.shields.io/badge/license-MIT-blue)
+![Node](https://img.shields.io/badge/node-%3E%3D18-green)
+![Status](https://img.shields.io/badge/status-MVP-orange)
+
 **Typed Prompt DSL + CLI** for building, validating, and rendering prompts like real software artifacts.
 
 > Think: **TypeScript / Terraform mindset for prompts** — structure, typed inputs, reproducibility.
@@ -40,15 +44,16 @@ PromptFarm treats prompts as **versioned, typed artifacts** with validation and 
 
 ## Quickstart
 
-### 1) Install dependencies
+1) Install dependencies
 ```bash
 npm install
+```
 
 2) Build & link the CLI (local)
-
+```bash
 npm run build
 npm link
-
+```
 3) Validate prompts
 
 promptfarm validate
@@ -62,9 +67,7 @@ promptfarm render explain_topic --set topic=CQRS
 promptfarm build
 
 
-⸻
-
-Prompt DSL
+## Prompt DSL
 
 A prompt is a structured object:
 	•	id — unique identifier (used by CLI + catalog)
@@ -74,7 +77,7 @@ A prompt is a structured object:
 Example: parameterized prompt
 
 prompts/explain_topic.prompt.yaml
-
+```bash
 id: explain_topic
 title: Explain any topic
 version: 0.1.0
@@ -95,7 +98,7 @@ messages:
     content: |
       Explain {{topic}} to senior engineers.
       Include trade-offs and a simple example.
-
+```
 Render:
 
 promptfarm render explain_topic --set topic="Event Sourcing"
@@ -110,9 +113,7 @@ Explain Event Sourcing to senior engineers.
 Include trade-offs and a simple example.
 
 
-⸻
-
-Commands
+## Commands
 
 promptfarm validate
 
@@ -146,9 +147,8 @@ Outputs:
 	•	dist/<id>.prompt.json — machine artifact
 	•	dist/index.json — catalog for tooling / VSCode extension
 
-⸻
 
-Output Artifacts
+## Output Artifacts
 
 After promptfarm build:
 
@@ -159,9 +159,8 @@ dist/
 
 dist/index.json is designed to be consumed by tooling (e.g. VSCode QuickPick).
 
-⸻
 
-Roadmap
+## Roadmap
 
 What turns this into Terraform/TypeScript-level prompt infrastructure:
 	•	🔜 Composition (use:) + dependency graph
@@ -173,9 +172,7 @@ What turns this into Terraform/TypeScript-level prompt infrastructure:
 	•	render & copy bundles
 	•	inline validation via schema
 
-⸻
-
-Philosophy
+## Philosophy
 
 Prompts are source code.
 LLMs are runtimes.
@@ -185,7 +182,24 @@ PromptFarm is the infrastructure layer that brings:
 	•	build outputs
 	•	reproducibility
 
-⸻
+
+
+## Project Status
+
+PromptFarm is currently an experimental project exploring the concept of **Prompt Infrastructure**.
+
+Current version:
+- Prompt DSL
+- Typed inputs
+- Validation
+- Rendering
+- Build artifacts
+
+Planned features:
+- Prompt composition
+- Prompt tests
+- Compiler targets (OpenAI / Claude / Gemini)
+- VSCode extension
 
 ## License
 
