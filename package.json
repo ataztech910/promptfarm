@@ -6,6 +6,7 @@
   "bin": {
     "promptfarm": "bin/promptfarm.cjs"
   },
+  "license": "MIT",
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",

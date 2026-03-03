@@ -11,7 +11,7 @@ export function cmdBuild(): Command {
     .description("Build dist artifacts from prompts")
     .option("--cwd <path>", "Project root", process.cwd())
     .option("--pattern <glob>", "Glob pattern", "prompts/**/*.prompt.yaml")
-    .option("--out <dir>", "Output directory", "dist");
+    .option("--out <dir>", "Output directory", "prompt_dist");
 
   c.action(async (opts) => {
     const cwd = path.resolve(opts.cwd);
