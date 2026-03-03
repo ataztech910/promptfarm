@@ -1,0 +1,29 @@
+{
+  "name": "promptfarm",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "promptfarm": "bin/promptfarm.cjs"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "pf:validate": "tsx src/cli/index.ts validate",
+    "pf:build": "tsx src/cli/index.ts build",
+    "pf:list": "tsx src/cli/index.ts list",
+    "pf:render": "tsx src/cli/index.ts render architecture_explainer"
+  },
+  "dependencies": {
+    "commander": "^12.0.0",
+    "fast-glob": "^3.3.2",
+    "yaml": "^2.5.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsup": "^8.5.1",
+    "tsx": "^4.16.2",
+    "typescript": "^5.5.0"
+  }
+}

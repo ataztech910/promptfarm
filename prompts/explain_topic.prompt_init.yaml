@@ -1,0 +1,14 @@
+id: explain_topic
+title: Explain any topic
+version: 0.1.0
+tags: [demo]
+
+messages:
+  - role: system
+    content: |
+      You are a pragmatic senior engineer. Avoid fluff.
+
+  - role: user
+    content: |
+      Explain {{topic}} to senior engineers.
+      Include trade-offs and a simple example.

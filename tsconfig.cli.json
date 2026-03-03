@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist-cli",
+    "rootDir": "src",
+    "module": "ES2022",
+    "target": "ES2022",
+    "moduleResolution": "Bundler",
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "sourceMap": true
+  },
+  "include": ["src/**/*.ts"]
+}
