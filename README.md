@@ -44,25 +44,19 @@ PromptFarm treats prompts as **versioned, typed artifacts** with validation and 
 
 ## Quickstart
 
-1) Install dependencies
+Install dependencies
 ```bash
-npm install
+npm install -g promptfarm
 ```
-
-2) Build & link the CLI (local)
-```bash
-npm run build
-npm link
-```
-3) Validate prompts
+2) Validate prompts
 
 promptfarm validate
 
-4) Render a prompt (OpenAI-style bundle)
+3) Render a prompt (OpenAI-style bundle)
 
 promptfarm render explain_topic --set topic=CQRS
 
-5) Build artifacts to dist/
+4) Build artifacts to dist/
 
 promptfarm build
 
