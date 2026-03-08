@@ -7,6 +7,7 @@ import { renderOpenAIBundle } from "../../core/render/openai.js";
 import { renderGeneric } from "../../core/render/generic.js";
 import type { TemplateVars } from "../../core/template.js";
 import { checkInputs } from "../../core/inputs.js";
+import { resolvePromptComposition } from "../../core/compose.js";
 import { printDebug } from "../debug.js";
 
 function parseSet(values: string[] | undefined): TemplateVars {
@@ -54,9 +55,22 @@ export function cmdRender(): Command {
       return;
     }
 
+    let resolvedPrompt = found;
+    try {
+      resolvedPrompt = resolvePromptComposition(
+        found.id,
+        res.prompts.map(({ prompt, filepath }) => ({ prompt, filepath })),
+      ).prompt;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`❌ ${message}`);
+      process.exitCode = 1;
+      return;
+    }
+
     const vars = parseSet(opts.set);
 
-    const checks = checkInputs(found, vars);
+    const checks = checkInputs(resolvedPrompt, vars);
 
     if (checks.usedButNotDeclared.length) {
       console.error(
@@ -69,7 +83,7 @@ export function cmdRender(): Command {
 
     if (checks.unknownProvided.length) {
       console.error(`❌ Unknown inputs provided: ${checks.unknownProvided.join(", ")}`);
-      console.error(`Allowed inputs: ${Object.keys(found.inputs ?? {}).join(", ") || "(none)"}`);
+      console.error(`Allowed inputs: ${Object.keys(resolvedPrompt.inputs ?? {}).join(", ") || "(none)"}`);
       process.exitCode = 1;
       return;
     }
@@ -83,8 +97,8 @@ export function cmdRender(): Command {
 
     const out =
       opts.target === "generic"
-        ? renderGeneric(found, vars)
-        : renderOpenAIBundle(found, vars);
+        ? renderGeneric(resolvedPrompt, vars)
+        : renderOpenAIBundle(resolvedPrompt, vars);
 
     process.stdout.write(out);
   });

@@ -7,21 +7,31 @@ import { cmdValidate } from "./commands/validate.js";
 import { cmdSearch } from "./commands/search.js";
 import { cmdInfo } from "./commands/info.js";
 import { cmdPaths } from "./commands/paths.js";
+import { cmdDiscover } from "./commands/discover.js";
+import { cmdInit } from "./commands/init.js";
+import { cmdContext } from "./commands/context.js";
+import { cmdReset } from "./commands/reset.js";
+import { cmdTest } from "./commands/test.js";
 
 
 const program = new Command();
 
 program
   .name("promptfarm")
-  .description("Prompt infrastructure CLI: validate, build, list, render")
+  .description("Prompt infrastructure CLI: init, validate, test, build, list, render, discover, context, reset")
   .version("0.1.0");
 
+program.addCommand(cmdInit());
+program.addCommand(cmdDiscover());
 program.addCommand(cmdValidate());
+program.addCommand(cmdTest());
 program.addCommand(cmdBuild());
 program.addCommand(cmdList());
 program.addCommand(cmdRender());
 program.addCommand(cmdSearch());
 program.addCommand(cmdInfo());
 program.addCommand(cmdPaths());
+program.addCommand(cmdContext());
+program.addCommand(cmdReset());
 
 program.parse(process.argv);

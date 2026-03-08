@@ -12,6 +12,7 @@ export const PromptSchema = z.object({
     .regex(/^[a-z0-9_]+$/i, "id must be alphanumeric/underscore"),
   title: z.string().min(3),
   version: z.string().min(1).default("0.1.0"),
+  use: z.array(z.string().min(1)).default([]),
   tags: z.array(z.string().min(1)).default([]),
   messages: z.array(PromptMessageSchema).min(1),
   // Optional metadata for future extension
