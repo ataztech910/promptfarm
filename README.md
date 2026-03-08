@@ -1,86 +1,67 @@
 # PromptFarm 🌾
+
+[![npm
+version](https://img.shields.io/npm/v/promptfarm)](https://www.npmjs.com/package/promptfarm)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D18-green)
 ![Status](https://img.shields.io/badge/status-MVP-orange)
 
-**Typed Prompt DSL + CLI** for building, validating, and rendering prompts like real software artifacts.
+**PromptFarm is prompt infrastructure for engineering teams.**
 
-> Think: **TypeScript / Terraform mindset for prompts** — structure, typed inputs, reproducibility.
+> Treat prompts like software artifacts --- typed, validated, versioned,
+> and reproducible.
 
----
+Think **Terraform / TypeScript mindset for prompts**.
 
-## Why PromptFarm
+------------------------------------------------------------------------
 
-Most teams still manage prompts like this:
+# 🚀 What is PromptFarm
 
-- `prompt.txt`
-- `prompt_v2_final.txt`
-- “that one good prompt in Slack”
+PromptFarm is a **CLI and DSL for managing prompts like real software**.
 
-But prompts are increasingly **production-critical** (policy, behavior, tone, safety).  
-PromptFarm treats prompts as **versioned, typed artifacts** with validation and build output.
+Instead of random text files and copy‑paste prompts, PromptFarm lets
+teams:
 
----
+-   define prompts as **structured artifacts**
+-   add **typed inputs**
+-   enforce **validation**
+-   generate **build artifacts**
+-   run **prompt tests**
+-   integrate prompts into **CI pipelines**
 
-## MVP Features (current)
+Prompts stop being text blobs and become **maintainable
+infrastructure**.
 
-- ✅ **Prompt DSL in YAML**
-- ✅ **Typed inputs** (required/optional)
-- ✅ **Template variables** with `{{var}}`
-- ✅ **Validation**
-  - schema validation
-  - duplicate IDs
-  - template variables must be declared in `inputs`
-  - unknown inputs rejected on render
-- ✅ **Render**
-  - `--target openai` (chat bundle)
-  - `--target generic` (human-readable)
-- ✅ **Build**
-  - `dist/<id>.prompt.md`
-  - `dist/<id>.prompt.json`
-  - `dist/index.json` (catalog)
+------------------------------------------------------------------------
 
----
+# ⚡ Install
 
-## Quickstart
-
-Install dependencies
-```bash
+``` bash
 npm install -g promptfarm
 ```
-2) Validate prompts
 
-promptfarm validate
+Verify installation:
 
-3) Render a prompt (OpenAI-style bundle)
+``` bash
+promptfarm doctor
+```
 
-promptfarm render explain_topic --set topic=CQRS
+------------------------------------------------------------------------
 
-4) Build artifacts to dist/
+# 🧠 30‑second example
 
-promptfarm build
+Create a prompt:
 
+``` yaml
+# prompts/explain_topic.prompt.yaml
 
-## Prompt DSL
-
-A prompt is a structured object:
-	•	id — unique identifier (used by CLI + catalog)
-	•	inputs — typed parameters (required/optional)
-	•	messages[] — chat-style prompt messages
-
-Example: parameterized prompt
-
-prompts/explain_topic.prompt.yaml
-```bash
 id: explain_topic
 title: Explain any topic
 version: 0.1.0
-tags: [demo]
 
 inputs:
   topic:
     type: string
-    description: Topic to explain
     required: true
 
 messages:
@@ -91,110 +72,215 @@ messages:
   - role: user
     content: |
       Explain {{topic}} to senior engineers.
-      Include trade-offs and a simple example.
+      Include trade‑offs and a simple example.
 ```
-Render:
 
-promptfarm render explain_topic --set topic="Event Sourcing"
+Render it:
+
+``` bash
+promptfarm render explain_topic --set topic=CQRS
+```
 
 Output:
 
-System:
-You are a pragmatic senior engineer. Avoid fluff.
+    System:
+    You are a pragmatic senior engineer. Avoid fluff.
 
-User:
-Explain Event Sourcing to senior engineers.
-Include trade-offs and a simple example.
+    User:
+    Explain CQRS to senior engineers.
+    Include trade‑offs and a simple example.
 
+------------------------------------------------------------------------
 
-## Commands
+# 📦 CLI Commands
 
+## Validate prompts
+
+``` bash
 promptfarm validate
+```
 
-Validates all prompts/**/*.prompt.yaml:
-	•	schema correctness
-	•	unique id
-	•	every {{var}} used must be declared in inputs
+Checks:
 
-promptfarm validate
+-   schema correctness
+-   unique IDs
+-   template variables declared in `inputs`
+-   duplicate prompts
 
-promptfarm render <id>
+------------------------------------------------------------------------
 
-Renders one prompt by id.
+## Render prompts
 
+``` bash
 promptfarm render explain_topic --set topic=CQRS
-promptfarm render explain_topic --set "topic=Event Sourcing"
-promptfarm render explain_topic --target generic --set topic=CQRS
+```
 
 Behavior:
-	•	missing required inputs → error
-	•	unknown --set keys → error
 
+-   missing required inputs → error
+-   unknown inputs → error
+-   deterministic output
+
+------------------------------------------------------------------------
+
+## Build artifacts
+
+``` bash
 promptfarm build
-
-Generates build artifacts in dist/.
-
-promptfarm build
+```
 
 Outputs:
-	•	dist/<id>.prompt.md — readable artifact
-	•	dist/<id>.prompt.json — machine artifact
-	•	dist/index.json — catalog for tooling / VSCode extension
 
+    dist/
+      explain_topic.prompt.md
+      explain_topic.prompt.json
+      index.json
 
-## Output Artifacts
+Artifacts enable integration with:
 
-After promptfarm build:
+-   CI pipelines
+-   prompt catalogs
+-   editor tooling
+-   AI automation
 
-dist/
-  explain_topic.prompt.md
-  explain_topic.prompt.json
-  index.json
+------------------------------------------------------------------------
 
-dist/index.json is designed to be consumed by tooling (e.g. VSCode QuickPick).
+## Run prompt tests
 
+``` bash
+promptfarm test
+```
 
-## Roadmap
+Example test:
 
-What turns this into Terraform/TypeScript-level prompt infrastructure:
-	•	🔜 Composition (use:) + dependency graph
-	•	🔜 Plan / Lock / Apply workflow
-	•	🔜 Prompt tests (regression checks in CI)
-	•	🔜 Compiler targets (OpenAI/Claude/Gemini formatting)
-	•	🔜 VSCode extension
-	•	catalog browsing (QuickPick from dist/index.json)
-	•	render & copy bundles
-	•	inline validation via schema
+``` yaml
+prompt: explain_topic
 
-## Philosophy
+cases:
+  - name: cqrs_case
+    inputs:
+      topic: CQRS
+    expect_contains:
+      - trade-offs
+      - example
+```
 
-Prompts are source code.
-LLMs are runtimes.
-PromptFarm is the infrastructure layer that brings:
-	•	typing
-	•	validation
-	•	build outputs
-	•	reproducibility
+------------------------------------------------------------------------
 
+## Generate project context
 
+``` bash
+promptfarm context --path src
+```
 
-## Project Status
+Creates an **AI‑friendly markdown bundle** describing the relevant code
+context.
 
-PromptFarm is currently an experimental project exploring the concept of **Prompt Infrastructure**.
+Useful for:
 
-Current version:
-- Prompt DSL
-- Typed inputs
-- Validation
-- Rendering
-- Build artifacts
+-   AI coding assistants
+-   PR reviews
+-   architecture analysis
 
-Planned features:
-- Prompt composition
-- Prompt tests
-- Compiler targets (OpenAI / Claude / Gemini)
-- VSCode extension
+------------------------------------------------------------------------
 
-## License
+## Diagnose project setup
+
+``` bash
+promptfarm doctor
+```
+
+Checks:
+
+-   Node version
+-   config
+-   prompts
+-   tests
+-   build artifacts
+
+------------------------------------------------------------------------
+
+# 🧩 Prompt DSL
+
+Prompts are defined as structured YAML:
+
+``` yaml
+id: explain_topic
+title: Explain topic
+version: 0.1.0
+
+inputs:
+  topic:
+    type: string
+    required: true
+
+messages:
+  - role: system
+    content: |
+      You are a pragmatic senior engineer.
+
+  - role: user
+    content: |
+      Explain {{topic}}.
+```
+
+Features:
+
+-   typed inputs
+-   template variables
+-   deterministic rendering
+-   validation
+-   build outputs
+
+------------------------------------------------------------------------
+
+# 🏗 Architecture Philosophy
+
+PromptFarm is built on three ideas:
+
+**Prompts = source code**
+
+**LLMs = runtimes**
+
+**PromptFarm = infrastructure layer**
+
+Just like:
+
+-   Terraform manages infrastructure
+-   TypeScript manages types
+
+PromptFarm manages **prompt systems**.
+
+------------------------------------------------------------------------
+
+# 🗺 Roadmap
+
+Planned evolution of PromptFarm:
+
+-   prompt composition (`use:`)
+-   prompt dependency graphs
+-   prompt lockfiles
+-   compiler targets (OpenAI / Claude / Gemini)
+-   VSCode extension
+-   prompt catalog browsing
+-   CI integrations
+-   automated prompt generation
+
+------------------------------------------------------------------------
+
+# 🤝 Contributing
+
+Contributions are welcome.
+
+Typical improvements:
+
+-   new compiler targets
+-   CLI improvements
+-   prompt testing features
+-   editor integrations
+
+------------------------------------------------------------------------
+
+# 📄 License
 
 MIT © Andrei Tazetdinov
