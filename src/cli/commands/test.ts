@@ -12,6 +12,10 @@ function toRel(cwd: string, absOrRel: string): string {
   return path.relative(cwd, absOrRel) || ".";
 }
 
+function toPosixGlob(globPath: string): string {
+  return globPath.replaceAll("\\", "/").replace(/^\/+/, "");
+}
+
 export function cmdTest(): Command {
   const c = new Command("test")
     .description("Run prompt tests from YAML files")
@@ -23,13 +27,30 @@ export function cmdTest(): Command {
     const cfg = await loadConfig(cwd);
 
     const promptFiles = await loadPromptFiles({ patternAbs: cfg.promptGlobAbs });
-    const testLoad = await loadTestFiles({ patternAbs: cfg.testGlobAbs });
+    const testLoad = await loadTestFiles({
+      patternAbs: cfg.testGlobAbs,
+      testsDirAbs: cfg.testsDirAbs,
+    });
+    const expectedPattern = `${cfg.testsDir.replaceAll("\\", "/")}/${toPosixGlob(cfg.testFiles)}`;
+    const expectedExtension = path.posix.basename(toPosixGlob(cfg.testFiles));
 
     if (opts.debug) {
       printDebug(cfg, {
         command: "test",
-        matchedFiles: testLoad.files.length,
+        matchedFiles: testLoad.matchedFilepaths.length,
       });
+    }
+
+    for (const ignoredFileAbs of testLoad.ignoredFiles) {
+      const relToTestsDir = path.relative(cfg.testsDirAbs, ignoredFileAbs) || path.basename(ignoredFileAbs);
+      console.warn(`Ignoring file: ${relToTestsDir}`);
+      console.warn(`Expected extension: ${expectedExtension}`);
+    }
+
+    if (testLoad.matchedFilepaths.length === 0) {
+      console.log(`No tests found in ${expectedPattern}`);
+      process.exitCode = 1;
+      return;
     }
 
     const promptValidation = validateLoadedPrompts(promptFiles);

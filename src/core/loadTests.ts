@@ -14,23 +14,38 @@ export type TestLoadIssue = {
 };
 
 export type LoadedTestsResult = {
+  matchedFilepaths: string[];
   files: LoadedTestFile[];
   issues: TestLoadIssue[];
+  ignoredFiles: string[];
 };
 
 export async function loadTestFiles(opts: {
   patternAbs: string;
+  testsDirAbs?: string;
 }): Promise<LoadedTestsResult> {
   if (!opts.patternAbs || typeof opts.patternAbs !== "string" || opts.patternAbs.trim().length === 0) {
     throw new Error(`loadTestFiles: patternAbs is empty. Got: "${String(opts.patternAbs)}"`);
   }
 
-  const matched = (await fg(opts.patternAbs, { absolute: true })).sort((a, b) => a.localeCompare(b));
+  const matchedFilepaths = (await fg(opts.patternAbs, { absolute: true, onlyFiles: true }))
+    .map((filepath) => path.normalize(filepath))
+    .sort((a, b) => a.localeCompare(b));
+  const matchedSet = new Set(matchedFilepaths);
+
+  let ignoredFiles: string[] = [];
+  if (opts.testsDirAbs) {
+    const testsDirGlob = `${path.resolve(opts.testsDirAbs).replaceAll("\\", "/")}/**/*`;
+    const allFiles = (await fg(testsDirGlob, { absolute: true, onlyFiles: true }))
+      .map((filepath) => path.normalize(filepath))
+      .sort((a, b) => a.localeCompare(b));
+    ignoredFiles = allFiles.filter((filepath) => !matchedSet.has(filepath));
+  }
 
   const files: LoadedTestFile[] = [];
   const issues: TestLoadIssue[] = [];
 
-  for (const filepath of matched) {
+  for (const filepath of matchedFilepaths) {
     try {
       const txt = await fs.readFile(filepath, "utf8");
       const raw = YAML.parse(txt);
@@ -44,5 +59,5 @@ export async function loadTestFiles(opts: {
     }
   }
 
-  return { files, issues };
+  return { matchedFilepaths, files, issues, ignoredFiles };
 }

@@ -12,6 +12,7 @@ import { cmdInit } from "./commands/init.js";
 import { cmdContext } from "./commands/context.js";
 import { cmdReset } from "./commands/reset.js";
 import { cmdTest } from "./commands/test.js";
+import { cmdDoctor } from "./commands/doctor.js";
 
 
 const program = new Command();
@@ -33,5 +34,6 @@ program.addCommand(cmdInfo());
 program.addCommand(cmdPaths());
 program.addCommand(cmdContext());
 program.addCommand(cmdReset());
+program.addCommand(cmdDoctor());
 
 program.parse(process.argv);

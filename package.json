@@ -1,19 +1,39 @@
 {
   "name": "promptfarm",
-  "version": "0.1.0",
-  "private": true,
+  "version": "0.2.0",
+  "description": "Prompt infrastructure for engineering teams",
   "type": "module",
   "bin": {
-    "promptfarm": "bin/promptfarm.cjs"
+    "promptfarm": "./bin/promptfarm.cjs"
   },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ataztech910/promptfarm"
+  },
+  "homepage": "https://github.com/ataztech910/promptfarm",
+  "keywords": [
+    "prompt",
+    "ai",
+    "llm",
+    "prompt-engineering",
+    "developer-tools",
+    "cli",
+    "typescript"
+  ],
+  "files": [
+    "dist",
+    "bin",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
-    "pf:validate": "tsx src/cli/index.ts validate",
-    "pf:build": "tsx src/cli/index.ts build",
-    "pf:list": "tsx src/cli/index.ts list",
-    "pf:render": "tsx src/cli/index.ts render architecture_explainer"
+    "validate": "tsx src/cli/index.ts validate",
+    "build:prompts": "tsx src/cli/index.ts build",
+    "list": "tsx src/cli/index.ts list",
+    "render": "tsx src/cli/index.ts render"
   },
   "dependencies": {
     "commander": "^12.0.0",
