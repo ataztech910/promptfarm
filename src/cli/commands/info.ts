@@ -1,19 +1,23 @@
 import { Command } from "commander";
 import path from "node:path";
+import { loadConfig } from "../../core/config.js";
 import { loadPromptFiles } from "../../core/load.js";
 import { validateLoadedPrompts } from "../../core/validate.js";
 import { extractUsedVars } from "../../core/inputs.js";
+import { printDebug } from "../debug.js";
 
 export function cmdInfo(): Command {
   const c = new Command("info")
     .description("Show prompt metadata, inputs, and used template variables")
     .argument("<id>", "Prompt id")
     .option("--cwd <path>", "Project root", process.cwd())
-    .option("--pattern <glob>", "Glob pattern", "prompts/**/*.prompt.yaml");
+    .option("--debug", "Print resolved config/paths");
 
   c.action(async (id: string, opts) => {
     const cwd = path.resolve(opts.cwd);
-    const files = await loadPromptFiles({ cwd, pattern: opts.pattern });
+    const cfg = await loadConfig(cwd);
+    const files = await loadPromptFiles({ patternAbs: cfg.promptGlobAbs });
+    if (opts.debug) printDebug(cfg, { command: "info", matchedFiles: files.length });
     const res = validateLoadedPrompts(files);
 
     if (res.issues.length) {

@@ -1,17 +1,21 @@
 import { Command } from "commander";
 import path from "node:path";
-import { loadPromptFiles } from "../../core/load";
-import { validateLoadedPrompts } from "../../core/validate";
+import { loadConfig } from "../../core/config.js";
+import { loadPromptFiles } from "../../core/load.js";
+import { validateLoadedPrompts } from "../../core/validate.js";
+import { printDebug } from "../debug.js";
 
 export function cmdValidate(): Command {
   const c = new Command("validate")
     .description("Validate prompts against schema and project rules")
     .option("--cwd <path>", "Project root", process.cwd())
-    .option("--pattern <glob>", "Glob pattern", "prompts/**/*.prompt.yaml");
+    .option("--debug", "Print resolved config/paths");
 
   c.action(async (opts) => {
     const cwd = path.resolve(opts.cwd);
-    const files = await loadPromptFiles({ cwd, pattern: opts.pattern });
+    const cfg = await loadConfig(cwd);
+    const files = await loadPromptFiles({ patternAbs: cfg.promptGlobAbs });
+    if (opts.debug) printDebug(cfg, { command: "validate", matchedFiles: files.length });
     const res = validateLoadedPrompts(files);
 
     if (res.issues.length) {

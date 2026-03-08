@@ -1,23 +1,27 @@
 import { Command } from "commander";
 import path from "node:path";
 import fs from "node:fs/promises";
-import { loadPromptFiles } from "../../core/load";
-import { validateLoadedPrompts } from "../../core/validate";
-import { buildIndex } from "../../core/compile";
-import { renderGeneric } from "../../core/render/generic";
+import { loadConfig } from "../../core/config.js";
+import { loadPromptFiles } from "../../core/load.js";
+import { validateLoadedPrompts } from "../../core/validate.js";
+import { buildIndex } from "../../core/compile.js";
+import { renderGeneric } from "../../core/render/generic.js";
+import { printDebug } from "../debug.js";
 
 export function cmdBuild(): Command {
   const c = new Command("build")
     .description("Build dist artifacts from prompts")
     .option("--cwd <path>", "Project root", process.cwd())
-    .option("--pattern <glob>", "Glob pattern", "prompts/**/*.prompt.yaml")
-    .option("--out <dir>", "Output directory", "prompt_dist");
+    .option("--out <dir>", "Override output directory (defaults to config distDir)")
+    .option("--debug", "Print resolved config/paths");
 
   c.action(async (opts) => {
     const cwd = path.resolve(opts.cwd);
-    const outDir = path.resolve(cwd, opts.out);
+    const cfg = await loadConfig(cwd);
+    const outDir = opts.out ? path.resolve(cwd, opts.out) : cfg.distDirAbs;
 
-    const files = await loadPromptFiles({ cwd, pattern: opts.pattern });
+    const files = await loadPromptFiles({ patternAbs: cfg.promptGlobAbs });
+    if (opts.debug) printDebug(cfg, { command: "build", matchedFiles: files.length });
     const res = validateLoadedPrompts(files);
 
     if (res.issues.length) {

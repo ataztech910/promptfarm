@@ -9,11 +9,13 @@ export type LoadedPromptFile = {
 };
 
 export async function loadPromptFiles(opts: {
-  cwd: string;
-  pattern?: string;
+  patternAbs: string;
 }): Promise<LoadedPromptFile[]> {
-  const pattern = opts.pattern ?? "prompts/**/*.prompt.yaml";
-  const files = await fg(pattern, { cwd: opts.cwd, absolute: true });
+  if (!opts.patternAbs || typeof opts.patternAbs !== "string" || opts.patternAbs.trim().length === 0) {
+    throw new Error(`loadPromptFiles: patternAbs is empty. Got: "${String(opts.patternAbs)}"`);
+  }
+
+  const files = await fg(opts.patternAbs, { absolute: true });
 
   const out: LoadedPromptFile[] = [];
   for (const filepath of files) {

@@ -1,7 +1,9 @@
 import { Command } from "commander";
 import path from "node:path";
+import { loadConfig } from "../../core/config.js";
 import { loadPromptFiles } from "../../core/load.js";
 import { validateLoadedPrompts } from "../../core/validate.js";
+import { printDebug } from "../debug.js";
 
 function score(hay: string, q: string): number {
   const s = hay.toLowerCase();
@@ -18,12 +20,14 @@ export function cmdSearch(): Command {
     .description("Search prompts by id/title/tags")
     .argument("<query>", "Search query")
     .option("--cwd <path>", "Project root", process.cwd())
-    .option("--pattern <glob>", "Glob pattern", "prompts/**/*.prompt.yaml")
+    .option("--debug", "Print resolved config/paths")
     .option("--limit <n>", "Max results", "10");
 
   c.action(async (query: string, opts) => {
     const cwd = path.resolve(opts.cwd);
-    const files = await loadPromptFiles({ cwd, pattern: opts.pattern });
+    const cfg = await loadConfig(cwd);
+    const files = await loadPromptFiles({ patternAbs: cfg.promptGlobAbs });
+    if (opts.debug) printDebug(cfg, { command: "search", matchedFiles: files.length });
     const res = validateLoadedPrompts(files);
 
     if (res.issues.length) {

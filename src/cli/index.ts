@@ -6,6 +6,7 @@ import { cmdRender } from "./commands/render.js";
 import { cmdValidate } from "./commands/validate.js";
 import { cmdSearch } from "./commands/search.js";
 import { cmdInfo } from "./commands/info.js";
+import { cmdPaths } from "./commands/paths.js";
 
 
 const program = new Command();
@@ -21,5 +22,6 @@ program.addCommand(cmdList());
 program.addCommand(cmdRender());
 program.addCommand(cmdSearch());
 program.addCommand(cmdInfo());
+program.addCommand(cmdPaths());
 
 program.parse(process.argv);
