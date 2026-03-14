@@ -1,0 +1,25 @@
+apiVersion: promptfarm/v1
+kind: Prompt
+
+metadata:
+  id: consulting_style
+  version: 1.0.0
+  title: Consulting style rules
+
+spec:
+  artifact:
+    type: instruction
+
+  inputs:
+    - name: audience
+      type: string
+      required: true
+
+  messages:
+    - role: system
+      content: |
+        Use consulting style: options, trade-offs, recommendation.
+
+  use:
+    - prompt: base
+      mode: inline

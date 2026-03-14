@@ -1,0 +1,19 @@
+apiVersion: promptfarm/v1
+kind: Prompt
+metadata:
+  id: book_chapter
+  version: 1.0.0
+  title: Book Chapter
+spec:
+  artifact:
+    type: book_text
+  inputs:
+    - name: chapter_topic
+      type: string
+      required: true
+  messages:
+    - role: user
+      content: Write a structured chapter about {{chapter_topic}}.
+  use:
+    - prompt: base
+

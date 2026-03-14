@@ -1,0 +1,39 @@
+apiVersion: promptfarm/v1
+kind: Prompt
+metadata:
+  id: code_scaffold
+  version: 1.0.0
+  title: Code Scaffold
+  tags:
+    - engineering
+spec:
+  artifact:
+    type: code
+  inputs:
+    - name: project_name
+      type: string
+      required: true
+  messages:
+    - role: user
+      content: Generate starter modules for {{project_name}}.
+  use:
+    - prompt: base
+  evaluation:
+    reviewerRoles:
+      - id: manager
+      - id: senior_engineer
+    rubric:
+      criteria:
+        - id: correctness
+          title: Correctness
+          maxScore: 5
+          weight: 2
+        - id: actionability
+          title: Actionability
+          maxScore: 5
+          weight: 1
+    qualityGates:
+      - metric: overall
+        operator: ">="
+        threshold: 0
+

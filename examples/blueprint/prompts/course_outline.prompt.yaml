@@ -1,0 +1,21 @@
+apiVersion: promptfarm/v1
+kind: Prompt
+metadata:
+  id: course_outline
+  version: 1.0.0
+  title: Course Outline
+  tags:
+    - engineers
+spec:
+  artifact:
+    type: course
+  inputs:
+    - name: subject
+      type: string
+      required: true
+  messages:
+    - role: user
+      content: Design a practical course for {{subject}}.
+  use:
+    - prompt: base
+

@@ -1,0 +1,24 @@
+apiVersion: promptfarm/v1
+kind: Prompt
+
+metadata:
+  id: base
+  version: 1.0.0
+  title: Base prompt
+
+spec:
+  artifact:
+    type: instruction
+
+  inputs:
+    - name: repo_name
+      type: string
+      required: true
+
+  messages:
+    - role: system
+      content: |
+        You are a senior engineer.
+        Keep answers concise and concrete.
+
+  use: []

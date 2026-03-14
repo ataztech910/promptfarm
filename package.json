@@ -1,50 +1,39 @@
 {
-  "name": "promptfarm",
+  "name": "promptfarm-workspace",
+  "private": true,
   "version": "0.2.2",
-  "description": "Prompt infrastructure for engineering teams",
-  "type": "module",
-  "bin": {
-    "promptfarm": "./bin/promptfarm.cjs"
-  },
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/ataztech910/promptfarm"
-  },
-  "homepage": "https://github.com/ataztech910/promptfarm",
-  "keywords": [
-    "prompt",
-    "ai",
-    "llm",
-    "prompt-engineering",
-    "developer-tools",
-    "cli",
-    "typescript"
-  ],
-  "files": [
-    "dist",
-    "bin",
-    "README.md",
-    "LICENSE"
-  ],
+  "description": "PromptFarm monorepo workspace",
+  "packageManager": "pnpm@9.0.0",
   "scripts": {
-    "build": "tsup",
-    "dev": "tsup --watch",
-    "validate": "tsx src/cli/index.ts validate",
-    "build:prompts": "tsx src/cli/index.ts build",
-    "list": "tsx src/cli/index.ts list",
-    "render": "tsx src/cli/index.ts render"
-  },
-  "dependencies": {
-    "commander": "^12.0.0",
-    "fast-glob": "^3.3.2",
-    "yaml": "^2.5.0",
-    "zod": "^3.23.8"
+    "build": "npm --prefix packages/core run build && npm --prefix packages/cli run build",
+    "typecheck": "npm --prefix packages/core run typecheck && npm --prefix packages/cli run typecheck && npx tsc --noEmit",
+    "test": "npm --prefix packages/core run test && npm --prefix packages/cli run test",
+    "validate": "node bin/promptfarm.cjs validate",
+    "resolve": "node bin/promptfarm.cjs resolve",
+    "doctor": "node bin/promptfarm.cjs doctor",
+    "evaluate": "node bin/promptfarm.cjs evaluate",
+    "blueprint": "node bin/promptfarm.cjs blueprint",
+    "build:prompts": "node bin/promptfarm.cjs build",
+    "list": "node bin/promptfarm.cjs list",
+    "render": "node bin/promptfarm.cjs render",
+    "test:composition": "npm --prefix packages/core run test:composition",
+    "test:integration": "npm --prefix packages/core run test:integration",
+    "test:evaluation": "npm --prefix packages/core run test:evaluation",
+    "test:blueprint": "npm --prefix packages/core run test:blueprint",
+    "test:builders": "npm --prefix packages/core run test:builders",
+    "test:cli-runtime": "npm --prefix packages/cli run test:cli-runtime",
+    "test:runtime-polish": "npm --prefix packages/cli run test:runtime-polish",
+    "cli": "node bin/promptfarm.cjs",
+    "studio:dev": "npm --prefix apps/studio run dev",
+    "studio:build": "npm --prefix apps/studio run build",
+    "editor:dev": "npm --prefix apps/studio run dev",
+    "editor:build": "npm --prefix apps/studio run build"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "tsup": "^8.5.1",
     "tsx": "^4.16.2",
     "typescript": "^5.5.0"
-  }
+  },
+  "license": "PolyForm-Noncommercial-1.0.0"
 }

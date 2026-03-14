@@ -1,0 +1,21 @@
+apiVersion: promptfarm/v1
+kind: Prompt
+metadata:
+  id: onboarding_course
+  version: 1.0.0
+  title: Onboarding Course
+  tags:
+    - engineers
+spec:
+  artifact:
+    type: course
+  inputs:
+    - name: domain_name
+      type: string
+      required: true
+  messages:
+    - role: user
+      content: Build an onboarding course for {{domain_name}}.
+  use:
+    - prompt: base
+

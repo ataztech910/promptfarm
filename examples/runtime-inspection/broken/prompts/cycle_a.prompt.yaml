@@ -1,0 +1,15 @@
+apiVersion: promptfarm/v1
+kind: Prompt
+metadata:
+  id: cycle_a
+  version: 1.0.0
+spec:
+  artifact:
+    type: instruction
+  inputs: []
+  messages:
+    - role: user
+      content: A in cycle.
+  use:
+    - prompt: cycle_b
+

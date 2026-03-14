@@ -1,0 +1,40 @@
+{
+  "name": "@promptfarm/core",
+  "version": "0.2.2",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/node.d.ts",
+      "default": "./dist/node.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run test:composition && npm run test:integration && npm run test:evaluation && npm run test:blueprint && npm run test:builders",
+    "test:composition": "node --import tsx --test src/core/promptComposition.test.ts src/domain/prompt/blockHierarchy.test.ts",
+    "test:integration": "node --import tsx --test src/core/runtimePipeline.integration.test.ts src/core/runtimeBuild.integration.test.ts",
+    "test:evaluation": "node --import tsx --test src/core/evaluation/engine.test.ts",
+    "test:blueprint": "node --import tsx --test src/core/blueprint/generator.test.ts",
+    "test:builders": "node --import tsx --test src/core/builders/builders.test.ts"
+  },
+  "dependencies": {
+    "fast-glob": "^3.3.2",
+    "yaml": "^2.5.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsup": "^8.5.1",
+    "tsx": "^4.16.2",
+    "typescript": "^5.5.0"
+  },
+  "license": "PolyForm-Noncommercial-1.0.0"
+}

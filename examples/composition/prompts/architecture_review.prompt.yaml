@@ -1,0 +1,32 @@
+apiVersion: promptfarm/v1
+kind: Prompt
+
+metadata:
+  id: architecture_review
+  version: 1.0.0
+  title: Architecture review
+
+spec:
+  artifact:
+    type: instruction
+
+  inputs:
+    - name: system_name
+      type: string
+      required: true
+    - name: audience
+      type: string
+      required: true
+    - name: repo_name
+      type: string
+      required: true
+
+  messages:
+    - role: user
+      content: |
+        Review architecture of {{system_name}} for {{audience}}.
+        Repository: {{repo_name}}.
+
+  use:
+    - prompt: consulting_style
+      mode: inline

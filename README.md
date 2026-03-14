@@ -1,286 +1,147 @@
-# PromptFarm 🌾
+# PromptFarm
 
-[![npm
-version](https://img.shields.io/npm/v/promptfarm)](https://www.npmjs.com/package/promptfarm)
-![License](https://img.shields.io/badge/license-MIT-blue)
+![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-red)
 ![Node](https://img.shields.io/badge/node-%3E%3D18-green)
-![Status](https://img.shields.io/badge/status-MVP-orange)
+![Status](https://img.shields.io/badge/status-stable-orange)
 
-**PromptFarm is prompt infrastructure for engineering teams.**
+PromptFarm is prompt infrastructure for engineering teams.
 
-> Treat prompts like software artifacts --- typed, validated, versioned,
-> and reproducible.
+It treats prompts as software artifacts: typed, validated, composable, evaluated, and reproducibly built.
 
-Think **Terraform / TypeScript mindset for prompts**.
+## Current Architecture
 
-------------------------------------------------------------------------
+PromptFarm is now a monorepo:
 
-# 🚀 What is PromptFarm
+```text
+apps/
+  studio/
 
-PromptFarm is a **CLI and DSL for managing prompts like real software**.
+packages/
+  core/
+  cli/
 
-Instead of random text files and copy‑paste prompts, PromptFarm lets
-teams:
-
--   define prompts as **structured artifacts**
--   add **typed inputs**
--   enforce **validation**
--   generate **build artifacts**
--   run **prompt tests**
--   integrate prompts into **CI pipelines**
-
-Prompts stop being text blobs and become **maintainable
-infrastructure**.
-
-------------------------------------------------------------------------
-
-# ⚡ Install
-
-``` bash
-npm install -g promptfarm
+docs/
+examples/
 ```
 
-Verify installation:
+### Package Boundaries
 
-``` bash
-promptfarm doctor
+- `packages/core`: canonical engine and runtime pipeline
+  - domain models + zod schemas
+  - parse / validate / resolve
+  - evaluation engine
+  - blueprint generation + blueprint validation
+  - deterministic builders
+  - diagnostics + runtime reporting
+- `packages/cli`: terminal client
+  - command routing
+  - argument parsing
+  - output formatting + exit codes
+  - consumes `@promptfarm/core` + `@promptfarm/core/node`
+- `apps/studio`: optional visual client foundation (future-facing)
+  - not required for engine usage
+  - not the source of truth
+
+`docs/` and `examples/` remain at repository root.
+
+### Core API Surface
+
+- `@promptfarm/core`: public engine API for clients and integrations
+  - domain types
+  - runtime pipeline contracts
+  - evaluation / blueprint / deterministic build stage APIs
+  - runtime reporting types
+- `@promptfarm/core/node`: Node-only helpers used by CLI/server tooling
+  - config/loading
+  - doctor checks
+  - filesystem-oriented runtime write/build helpers
+  - project context/discovery utilities
+
+## Runtime Pipeline
+
+The canonical runtime flow is:
+
+`parse -> validate -> resolve -> evaluate -> blueprint -> validate blueprint -> deterministic build`
+
+Runtime state is passed through `ExecutionContext`, where:
+
+- `sourcePrompt` is authored source
+- `resolvedArtifact` is runtime truth
+- `evaluation`, `blueprint`, `buildOutput` are stage outputs
+- `resolvedPrompt` remains a transitional compatibility adapter
+
+## Primary Interface
+
+CLI remains the primary interface for PromptFarm runtime usage.
+
+Core runtime commands:
+
+- `validate`
+- `resolve`
+- `doctor`
+- `list`
+- `test`
+- `evaluate`
+- `blueprint`
+- `build`
+
+## Workspace Setup
+
+### Prerequisites
+
+- Node.js 18+
+- pnpm 9+
+
+### Install
+
+```bash
+pnpm install
 ```
 
-------------------------------------------------------------------------
+### Validate TypeScript
 
-# 🧠 30‑second example
-
-Create a prompt:
-
-``` yaml
-# prompts/explain_topic.prompt.yaml
-
-id: explain_topic
-title: Explain any topic
-version: 0.1.0
-
-inputs:
-  topic:
-    type: string
-    required: true
-
-messages:
-  - role: system
-    content: |
-      You are a pragmatic senior engineer. Avoid fluff.
-
-  - role: user
-    content: |
-      Explain {{topic}} to senior engineers.
-      Include trade‑offs and a simple example.
+```bash
+npx tsc --noEmit
 ```
 
-Render it:
+### Build Packages
 
-``` bash
-promptfarm render explain_topic --set topic=CQRS
+```bash
+npm run build
 ```
 
-Output:
+### Run Tests
 
-    System:
-    You are a pragmatic senior engineer. Avoid fluff.
-
-    User:
-    Explain CQRS to senior engineers.
-    Include trade‑offs and a simple example.
-
-------------------------------------------------------------------------
-
-# 📦 CLI Commands
-
-## Validate prompts
-
-``` bash
-promptfarm validate
+```bash
+npm run test
 ```
 
-Checks:
+### Run CLI (development)
 
--   schema correctness
--   unique IDs
--   template variables declared in `inputs`
--   duplicate prompts
-
-------------------------------------------------------------------------
-
-## Render prompts
-
-``` bash
-promptfarm render explain_topic --set topic=CQRS
+```bash
+npm run validate -- --cwd examples/evaluation
+npm run resolve -- architecture_review --cwd examples/evaluation --format json
+npm run evaluate -- architecture_review --cwd examples/evaluation --format json
+npm run blueprint -- architecture_review --cwd examples/evaluation --format json
+npm run build:prompts -- --cwd examples/builders --format json
 ```
 
-Behavior:
+### Run Studio (optional)
 
--   missing required inputs → error
--   unknown inputs → error
--   deterministic output
-
-------------------------------------------------------------------------
-
-## Build artifacts
-
-``` bash
-promptfarm build
+```bash
+npm run studio:dev
 ```
 
-Outputs:
+## Documentation
 
-    dist/
-      explain_topic.prompt.md
-      explain_topic.prompt.json
-      index.json
+- Context docs: `docs/context/`
+- Monorepo architecture: `docs/context/09-monorepo-architecture.md`
+- Developer setup: `docs/development/setup.md`
+- Repository structure: `docs/development/repository-structure.md`
 
-Artifacts enable integration with:
+## License
 
--   CI pipelines
--   prompt catalogs
--   editor tooling
--   AI automation
+This repository is licensed under **PolyForm Noncommercial 1.0.0**.
 
-------------------------------------------------------------------------
-
-## Run prompt tests
-
-``` bash
-promptfarm test
-```
-
-Example test:
-
-``` yaml
-prompt: explain_topic
-
-cases:
-  - name: cqrs_case
-    inputs:
-      topic: CQRS
-    expect_contains:
-      - trade-offs
-      - example
-```
-
-------------------------------------------------------------------------
-
-## Generate project context
-
-``` bash
-promptfarm context --path src
-```
-
-Creates an **AI‑friendly markdown bundle** describing the relevant code
-context.
-
-Useful for:
-
--   AI coding assistants
--   PR reviews
--   architecture analysis
-
-------------------------------------------------------------------------
-
-## Diagnose project setup
-
-``` bash
-promptfarm doctor
-```
-
-Checks:
-
--   Node version
--   config
--   prompts
--   tests
--   build artifacts
-
-------------------------------------------------------------------------
-
-# 🧩 Prompt DSL
-
-Prompts are defined as structured YAML:
-
-``` yaml
-id: explain_topic
-title: Explain topic
-version: 0.1.0
-
-inputs:
-  topic:
-    type: string
-    required: true
-
-messages:
-  - role: system
-    content: |
-      You are a pragmatic senior engineer.
-
-  - role: user
-    content: |
-      Explain {{topic}}.
-```
-
-Features:
-
--   typed inputs
--   template variables
--   deterministic rendering
--   validation
--   build outputs
-
-------------------------------------------------------------------------
-
-# 🏗 Architecture Philosophy
-
-PromptFarm is built on three ideas:
-
-**Prompts = source code**
-
-**LLMs = runtimes**
-
-**PromptFarm = infrastructure layer**
-
-Just like:
-
--   Terraform manages infrastructure
--   TypeScript manages types
-
-PromptFarm manages **prompt systems**.
-
-------------------------------------------------------------------------
-
-# 🗺 Roadmap
-
-Planned evolution of PromptFarm:
-
--   prompt composition (`use:`)
--   prompt dependency graphs
--   prompt lockfiles
--   compiler targets (OpenAI / Claude / Gemini)
--   VSCode extension
--   prompt catalog browsing
--   CI integrations
--   automated prompt generation
-
-------------------------------------------------------------------------
-
-# 🤝 Contributing
-
-Contributions are welcome.
-
-Typical improvements:
-
--   new compiler targets
--   CLI improvements
--   prompt testing features
--   editor integrations
-
-------------------------------------------------------------------------
-
-# 📄 License
-
-MIT © Andrei Tazetdinov
+Commercial use is not permitted without a separate commercial agreement.
+See [LICENSE.md](LICENSE.md).

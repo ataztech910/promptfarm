@@ -1,0 +1,19 @@
+apiVersion: promptfarm/v1
+kind: Prompt
+metadata:
+  id: code_service
+  version: 1.0.0
+  title: Code Service
+spec:
+  artifact:
+    type: code
+  inputs:
+    - name: service_name
+      type: string
+      required: true
+  messages:
+    - role: user
+      content: Generate a service skeleton for {{service_name}}.
+  use:
+    - prompt: base
+

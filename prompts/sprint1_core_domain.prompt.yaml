@@ -1,0 +1,88 @@
+apiVersion: promptfarm/v1
+kind: Prompt
+
+metadata:
+  id: architecture_review
+  version: 1.0.0
+  title: Architecture Review Assistant
+  description: Structured architecture review prompt using PromptFarm v1 domain model.
+  tags:
+    - architecture
+    - review
+
+spec:
+  artifact:
+    type: instruction
+
+  inputs:
+    - name: system_name
+      type: string
+      description: Name of the system being reviewed.
+      required: true
+
+    - name: constraints
+      type: json
+      description: Optional constraints for context.
+      required: false
+      default:
+        latency_ms: 200
+        throughput_rps: 1000
+
+  messages:
+    - role: system
+      content: |
+        You are a senior software architect.
+        Respond with clear trade-offs and concrete recommendations.
+
+    - role: user
+      content: |
+        Review architecture for {{system_name}}.
+        Consider constraints: {{constraints}}.
+        Output a concise step-by-step recommendation.
+
+  use:
+    - prompt: consulting_style
+      mode: inline
+      with:
+        audience: senior_engineers
+
+  evaluation:
+    reviewerRoles:
+      - id: manager
+        title: Engineering Manager
+        description: Assesses delivery risk and alignment.
+        weight: 1
+
+      - id: senior_engineer
+        title: Senior Engineer
+        description: Assesses technical depth and correctness.
+        weight: 1.5
+
+    rubric:
+      criteria:
+        - id: correctness
+          title: Technical correctness
+          weight: 2
+          maxScore: 5
+
+        - id: actionability
+          title: Actionability
+          weight: 1
+          maxScore: 5
+
+    qualityGates:
+      - metric: overall
+        operator: ">="
+        threshold: 4
+
+      - metric: criterion
+        criterionId: correctness
+        operator: ">="
+        threshold: 4
+
+  buildTargets:
+    - id: markdown
+      format: md
+      outputPath: dist/architecture_review.md
+      options:
+        includeMetadata: true
