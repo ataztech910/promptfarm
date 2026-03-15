@@ -1,19 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { PromptSchema, getAllowedPromptBlockKinds } from "../../domain/index.js";
+import { ArtifactType, PromptSchema, getAllowedPromptBlockKinds } from "../../domain/index.js";
 
 test("shared block hierarchy rules are parent-kind aware for book_text", () => {
-  assert.deepEqual(getAllowedPromptBlockKinds("book_text", null), ["chapter"]);
-  assert.deepEqual(getAllowedPromptBlockKinds("book_text", "chapter"), ["section"]);
-  assert.deepEqual(getAllowedPromptBlockKinds("book_text", "section"), ["generic_block"]);
-  assert.deepEqual(getAllowedPromptBlockKinds("book_text", "generic_block"), ["generic_block"]);
+  assert.deepEqual(getAllowedPromptBlockKinds(ArtifactType.BookText, null), ["chapter"]);
+  assert.deepEqual(getAllowedPromptBlockKinds(ArtifactType.BookText, "chapter"), ["section"]);
+  assert.deepEqual(getAllowedPromptBlockKinds(ArtifactType.BookText, "section"), ["generic_block"]);
+  assert.deepEqual(getAllowedPromptBlockKinds(ArtifactType.BookText, "generic_block"), ["generic_block"]);
 });
 
 test("shared block hierarchy rules allow recursive generic blocks across artifact types", () => {
-  assert.deepEqual(getAllowedPromptBlockKinds("code", "generic_block"), ["generic_block"]);
-  assert.deepEqual(getAllowedPromptBlockKinds("story", "generic_block"), ["generic_block"]);
-  assert.deepEqual(getAllowedPromptBlockKinds("instruction", "generic_block"), ["generic_block"]);
-  assert.deepEqual(getAllowedPromptBlockKinds("course", "generic_block"), ["generic_block"]);
+  assert.deepEqual(getAllowedPromptBlockKinds(ArtifactType.Code, "generic_block"), ["generic_block"]);
+  assert.deepEqual(getAllowedPromptBlockKinds(ArtifactType.Story, "generic_block"), ["generic_block"]);
+  assert.deepEqual(getAllowedPromptBlockKinds(ArtifactType.Instruction, "generic_block"), ["generic_block"]);
+  assert.deepEqual(getAllowedPromptBlockKinds(ArtifactType.Course, "generic_block"), ["generic_block"]);
 });
 
 test("PromptSchema rejects invalid nested block hierarchy", () => {

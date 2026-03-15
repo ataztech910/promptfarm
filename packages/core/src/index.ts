@@ -25,3 +25,6 @@ export * from "./core/blueprint/validator.js";
 
 export * from "./core/builders/buildArtifact.js";
 export * from "./core/reporting/runtimeReport.js";
+
+export * from "./core/nodeExecution.js";
+export * from "./core/nodeExecutionRepository.js";

@@ -68,6 +68,10 @@ export function InspectorPanel({ contextualOnly = false, showHeader = true }: In
   const latestScopeOutputs = useStudioStore((s) => s.latestScopeOutputs);
   const refreshSelectedScopePromptPreview = useStudioStore((s) => s.refreshSelectedScopePromptPreview);
   const runSelectedScopeRuntimeAction = useStudioStore((s) => s.runSelectedScopeRuntimeAction);
+  const nodeRuntimeStates = useStudioStore((s) => s.nodeRuntimeStates);
+  const runNode = useStudioStore((s) => s.runNode);
+  const stopNode = useStudioStore((s) => s.stopNode);
+  const toggleNodeEnabled = useStudioStore((s) => s.toggleNodeEnabled);
 
   const selection = useMemo(() => {
     return resolveEditorSelection({
@@ -556,6 +560,98 @@ export function InspectorPanel({ contextualOnly = false, showHeader = true }: In
           </div>
         )}
       </ScrollArea>
+
+      {selection && (selection.kind === "block" || selection.kind === "prompt") ? (
+        <div className="border-t border-border p-3">
+          <Section title="Node Execution" description="View node execution state and output.">
+            <div className="space-y-3">
+              {(() => {
+                const runtimeNodeId = selection.kind === "prompt" && canonicalPrompt
+                  ? `prompt_root_${canonicalPrompt.metadata.id}`
+                  : selection.kind === "block"
+                    ? selection.block.id
+                    : null;
+                const runtimeState = runtimeNodeId ? nodeRuntimeStates[runtimeNodeId] : null;
+                if (!runtimeState) return <p className="text-xs text-muted-foreground">No runtime state available.</p>;
+                const runtimeLabel = runtimeState.status === "running" && runtimeState.cancelRequestedAt ? "stopping" : runtimeState.status;
+
+                return (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <Badge
+                        className={
+                          runtimeState.status === "success"
+                            ? "bg-green-100 text-green-800"
+                            : runtimeState.status === "error"
+                            ? "bg-red-100 text-red-800"
+                            : runtimeState.status === "running"
+                            ? "bg-blue-100 text-blue-800"
+                            : runtimeState.status === "stale"
+                            ? "bg-yellow-100 text-yellow-800"
+                            : "bg-gray-100 text-gray-800"
+                        }
+                      >
+                        {runtimeLabel}
+                      </Badge>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => runNode(selectedNodeId!)}
+                        disabled={runtimeState.status === "running"}
+                      >
+                        Run {selection.kind === "prompt" ? "Root" : "Node"}
+                      </Button>
+                      {runtimeState.status === "running" ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => stopNode(selectedNodeId!)}
+                          disabled={Boolean(runtimeState.cancelRequestedAt)}
+                        >
+                          {runtimeState.cancelRequestedAt ? "Stopping" : "Stop"}
+                        </Button>
+                      ) : null}
+                      {selection.kind === "block" ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => toggleNodeEnabled(selectedNodeId!)}
+                        >
+                          {runtimeState.enabled ? "Disable" : "Enable"}
+                        </Button>
+                      ) : null}
+                    </div>
+                    {selection.kind === "block" ? (
+                      <div className="text-xs text-muted-foreground">Assembly: {runtimeState.enabled ? "enabled" : "disabled"}</div>
+                    ) : null}
+                    {runtimeState.lastRunAt && (
+                      <div className="text-xs text-muted-foreground">
+                        Last run: {new Date(runtimeState.lastRunAt).toLocaleTimeString()}
+                      </div>
+                    )}
+                    {runtimeState.startedAt && runtimeState.status === "running" ? (
+                      <div className="text-xs text-muted-foreground">
+                        Started: {new Date(runtimeState.startedAt).toLocaleTimeString()}
+                      </div>
+                    ) : null}
+                    {runtimeState.cancelRequestedAt ? (
+                      <div className="text-xs text-muted-foreground">
+                        Stop requested: {new Date(runtimeState.cancelRequestedAt).toLocaleTimeString()}
+                      </div>
+                    ) : null}
+                    {runtimeState.output && (
+                      <PreviewValue value={runtimeState.output} />
+                    )}
+                  </>
+                );
+              })()}
+            </div>
+          </Section>
+        </div>
+      ) : null}
     </div>
   );
 }

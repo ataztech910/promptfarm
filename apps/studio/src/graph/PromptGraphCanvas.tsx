@@ -6,7 +6,6 @@ import {
   ReactFlow,
   type Node,
   type NodeMouseHandler,
-  type PaneMouseHandler,
 } from "@xyflow/react";
 import { STUDIO_NODE_TYPES } from "../nodes/nodeRegistry";
 import { useStudioStore } from "../state/studioStore";
@@ -64,11 +63,11 @@ export function PromptGraphCanvas({
     }
   };
 
-  const onPaneClick: PaneMouseHandler = () => {
+  const onPaneClick = () => {
     onPaneActivate?.();
   };
 
-  function handlePaneContextMenu(event: ReactMouseEvent) {
+  function handlePaneContextMenu(event: MouseEvent | ReactMouseEvent<Element, MouseEvent>) {
     event.preventDefault();
     onPaneContextMenu?.({ x: event.clientX, y: event.clientY });
   }
