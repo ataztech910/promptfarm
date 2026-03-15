@@ -103,3 +103,18 @@ export {
   JsonValueSchema,
   JsonRecordSchema,
 } from "./shared/primitives.js";
+
+export {
+  NodeStatusSchema,
+  NodeExecutionLifecycleStatusSchema,
+  NodeExecutionScopeSchema,
+  NodeRuntimeStateSchema,
+  NodeExecutionRecordSchema,
+  NodeExecutionResultSchema,
+  type NodeStatus,
+  type NodeExecutionLifecycleStatus,
+  type NodeExecutionScope,
+  type NodeRuntimeState,
+  type NodeExecutionRecord,
+  type NodeExecutionResult,
+} from "./runtime/nodeRuntimeState.js";

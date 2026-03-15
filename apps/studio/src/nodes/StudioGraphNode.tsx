@@ -1,15 +1,23 @@
 import { useMemo, useState, type MouseEvent } from "react";
 import type { NodeProps } from "@xyflow/react";
 import { Handle, Position } from "@xyflow/react";
-import { Plus } from "lucide-react";
-import { useStudioStore } from "../state/studioStore";
-import { getSuggestedBlockKinds } from "../model/promptTree";
+import { Plus, Play, X } from "lucide-react";
 import type { PromptBlockKind } from "@promptfarm/core";
 import type { StudioNodeData } from "../graph/types";
+import { getSuggestedBlockKinds } from "../model/promptTree";
+import { useStudioStore } from "../state/studioStore";
 import { NODE_REGISTRY_MAP } from "./nodeRegistry";
 
 function formatBlockKind(value: string): string {
   return value.replaceAll("_", " ");
+}
+
+function statusClassName(status: "idle" | "running" | "success" | "error" | "stale"): string {
+  if (status === "success") return "border-emerald-300/80 bg-emerald-100 text-emerald-900";
+  if (status === "error") return "border-red-300/80 bg-red-100 text-red-900";
+  if (status === "running") return "border-sky-300/80 bg-sky-100 text-sky-900";
+  if (status === "stale") return "border-amber-300/80 bg-amber-100 text-amber-900";
+  return "border-border bg-background/95 text-muted-foreground";
 }
 
 export function StudioGraphNode({ id, data, selected }: NodeProps) {
@@ -20,6 +28,9 @@ export function StudioGraphNode({ id, data, selected }: NodeProps) {
   const applyGraphIntent = useStudioStore((s) => s.applyGraphIntent);
   const setSelectedNodeId = useStudioStore((s) => s.setSelectedNodeId);
   const selectedNodeId = useStudioStore((s) => s.selectedNodeId);
+  const nodeRuntimeStates = useStudioStore((s) => s.nodeRuntimeStates);
+  const runNode = useStudioStore((s) => s.runNode);
+  const stopNode = useStudioStore((s) => s.stopNode);
   const [quickActionsOpen, setQuickActionsOpen] = useState(false);
   const isSelected = selectedNodeId === id || selected;
 
@@ -29,6 +40,21 @@ export function StudioGraphNode({ id, data, selected }: NodeProps) {
     if (!blockId) return [];
     return getSuggestedBlockKinds(canonicalPrompt, blockId).slice(0, 3);
   }, [canonicalPrompt, node.kind, node.properties.__blockId, node.properties.blockId]);
+
+  const runtimeState = useMemo(() => {
+    if (node.kind === "prompt") {
+      const promptId = node.properties.id;
+      return promptId ? nodeRuntimeStates[`prompt_root_${promptId}`] ?? null : null;
+    }
+
+    if (node.kind !== "block") {
+      return null;
+    }
+
+    const blockId = node.properties.__blockId ?? node.properties.blockId;
+    return blockId ? nodeRuntimeStates[blockId] ?? null : null;
+  }, [node.kind, node.properties.__blockId, node.properties.blockId, node.properties.id, nodeRuntimeStates]);
+  const runtimeLabel = runtimeState?.status === "running" && runtimeState.cancelRequestedAt ? "stopping" : runtimeState?.status;
 
   function handleQuickAdd(kind: PromptBlockKind, event: MouseEvent<HTMLButtonElement>) {
     event.stopPropagation();
@@ -47,34 +73,65 @@ export function StudioGraphNode({ id, data, selected }: NodeProps) {
     >
       <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-0 !bg-border" />
 
-      {node.kind === "block" && quickAddKinds.length > 0 ? (
-        <div className="absolute top-2 right-2 z-10">
-          <button
-            type="button"
-            className="flex h-7 w-7 items-center justify-center rounded-full border border-border bg-background/95 text-muted-foreground opacity-90 shadow transition hover:text-foreground hover:opacity-100"
-            onClick={(event) => {
-              event.stopPropagation();
-              setQuickActionsOpen((open) => !open);
-            }}
-            title="Add child block"
-          >
-            <Plus className="h-3.5 w-3.5" />
-          </button>
-
-          {quickActionsOpen ? (
-            <div className="absolute top-9 right-0 flex min-w-[160px] flex-col rounded-md border border-border bg-card p-1 shadow-2xl">
-              {quickAddKinds.map((kind) => (
-                <button
-                  key={`${id}:${kind}`}
-                  type="button"
-                  className="rounded px-2 py-1.5 text-left text-xs text-foreground hover:bg-muted"
-                  onClick={(event) => handleQuickAdd(kind, event)}
-                >
-                  Add child {formatBlockKind(kind)}
-                </button>
-              ))}
-            </div>
+      {runtimeState ? (
+        <div className="absolute -top-3 right-0 z-20 flex translate-y-[-100%] items-center gap-1">
+          <span className={`rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-wide shadow-sm ${statusClassName(runtimeState.status)}`}>
+            {runtimeLabel}
+          </span>
+          {runtimeState.status === "running" ? (
+            <button
+              type="button"
+              className="flex h-7 w-7 items-center justify-center rounded-full border border-red-300/80 bg-red-100 text-red-900 shadow transition hover:bg-red-200"
+              onClick={(event) => {
+                event.stopPropagation();
+                stopNode(id);
+              }}
+              title={runtimeState.cancelRequestedAt ? "Stop requested" : "Stop execution"}
+              disabled={Boolean(runtimeState.cancelRequestedAt)}
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="flex h-7 w-7 items-center justify-center rounded-full border border-emerald-300/80 bg-emerald-100 text-emerald-900 shadow transition hover:bg-emerald-200"
+              onClick={(event) => {
+                event.stopPropagation();
+                runNode(id);
+              }}
+              title={node.kind === "prompt" ? "Run root node" : "Run node"}
+            >
+              <Play className="h-3.5 w-3.5" />
+            </button>
+          )}
+          {node.kind === "block" && quickAddKinds.length > 0 ? (
+            <button
+              type="button"
+              className="flex h-7 w-7 items-center justify-center rounded-full border border-border bg-background/95 text-muted-foreground shadow transition hover:text-foreground"
+              onClick={(event) => {
+                event.stopPropagation();
+                setQuickActionsOpen((open) => !open);
+              }}
+              title="Add child block"
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </button>
           ) : null}
+        </div>
+      ) : null}
+
+      {quickActionsOpen && node.kind === "block" && quickAddKinds.length > 0 ? (
+        <div className="absolute -top-2 right-0 z-20 flex min-w-[160px] translate-y-[-100%] flex-col rounded-md border border-border bg-card p-1 shadow-2xl">
+          {quickAddKinds.map((kind) => (
+            <button
+              key={`${id}:${kind}`}
+              type="button"
+              className="rounded px-2 py-1.5 text-left text-xs text-foreground hover:bg-muted"
+              onClick={(event) => handleQuickAdd(kind, event)}
+            >
+              Add child {formatBlockKind(kind)}
+            </button>
+          ))}
         </div>
       ) : null}
 
@@ -82,7 +139,7 @@ export function StudioGraphNode({ id, data, selected }: NodeProps) {
         {Icon ? <Icon className={`h-3.5 w-3.5 ${registryItem?.accent ?? "text-muted-foreground"}`} /> : null}
         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{registryItem?.title ?? node.kind}</p>
       </div>
-      <p className="pr-8 text-sm font-medium text-foreground">{node.title}</p>
+      <p className="text-sm font-medium text-foreground">{node.title}</p>
       <p className="line-clamp-2 text-xs text-muted-foreground">{node.description}</p>
 
       <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !border-0 !bg-border" />

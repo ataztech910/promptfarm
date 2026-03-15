@@ -11,6 +11,10 @@ function rootPromptSelectionId(store: ReturnType<typeof useStudioStore.getState>
   return `prompt:${store.canonicalPrompt.metadata.id}`;
 }
 
+async function flushNodeRunQueue(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 const ROUNDTRIP_FIXTURE_YAML = `apiVersion: promptfarm/v1
 kind: Prompt
 metadata:
@@ -729,4 +733,59 @@ test("focused block runtime actions run in block scope without breaking root run
   store = useStudioStore.getState();
   assert.equal(store.executionStatus, "success");
   assert.ok(store.runtimePreview.blueprint);
+});
+
+test("node execution supports root and block runs without wiping runtime state on edit", async () => {
+  resetStudioStoreForTests(TREE_EVAL_FIXTURE_YAML);
+  let store = useStudioStore.getState();
+
+  store.runNode(rootPromptSelectionId(store));
+  assert.equal(useStudioStore.getState().nodeRuntimeStates.prompt_root_tree_eval?.status, "running");
+  await flushNodeRunQueue();
+
+  store = useStudioStore.getState();
+  assert.equal(store.nodeRuntimeStates.prompt_root_tree_eval?.status, "success");
+  assert.equal(Object.keys(store.nodeExecutionRecords).length, 1);
+  assert.equal(store.nodeExecutionRecords.node_exec_1?.status, "success");
+
+  store.runNode("block:phase_1");
+  assert.equal(useStudioStore.getState().nodeRuntimeStates.phase_1?.status, "running");
+  await flushNodeRunQueue();
+
+  store = useStudioStore.getState();
+  assert.equal(store.nodeRuntimeStates.phase_1?.status, "success");
+  assert.equal(store.nodeExecutionRecords.node_exec_2?.status, "success");
+  assert.ok(store.nodeRuntimeStates.phase_1?.output?.includes("Plan the implementation phase."));
+  assert.equal(store.latestScopeOutputs["block:phase_1"]?.action, "resolve");
+
+  store.applyGraphIntent({
+    type: "block.patch",
+    blockId: "phase_1",
+    changes: {
+      title: "Phase 1 Updated",
+    },
+  });
+
+  store = useStudioStore.getState();
+  assert.equal(store.nodeRuntimeStates.prompt_root_tree_eval?.status, "stale");
+  assert.equal(store.nodeRuntimeStates.phase_1?.status, "stale");
+  assert.equal(store.nodeExecutionRecords.node_exec_1?.status, "success");
+  assert.equal(store.nodeExecutionRecords.node_exec_2?.status, "success");
+});
+
+test("node execution stop cancels queued runs before resolve completes", async () => {
+  resetStudioStoreForTests(TREE_EVAL_FIXTURE_YAML);
+  const store = useStudioStore.getState();
+
+  store.runNode("block:phase_1");
+  assert.equal(useStudioStore.getState().nodeRuntimeStates.phase_1?.status, "running");
+
+  useStudioStore.getState().stopNode("block:phase_1");
+  await flushNodeRunQueue();
+
+  const next = useStudioStore.getState();
+  assert.equal(next.nodeRuntimeStates.phase_1?.status, "idle");
+  assert.equal(next.nodeRuntimeStates.phase_1?.lastRunAt, undefined);
+  assert.equal(next.nodeExecutionRecords.node_exec_1?.status, "cancelled");
+  assert.ok(next.nodeExecutionRecords.node_exec_1?.cancelRequestedAt);
 });

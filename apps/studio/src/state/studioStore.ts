@@ -1,5 +1,16 @@
 import { applyEdgeChanges, applyNodeChanges, type EdgeChange, type NodeChange } from "@xyflow/react";
-import type { Prompt } from "@promptfarm/core";
+import {
+  cancelNodeExecutionRecord,
+  completeNodeExecutionRecord,
+  createInMemoryNodeExecutionRepository,
+  createNodeExecutionRecord,
+  requestNodeExecutionCancellation,
+  type NodeExecutionRepository,
+  type NodeExecutionRecord,
+  type NodeRuntimeState,
+  type Prompt,
+  type PromptBlock,
+} from "@promptfarm/core";
 import YAML from "yaml";
 import { create } from "zustand";
 import { createStarterPrompt, type StarterArtifactChoice } from "../editor/goldenPath";
@@ -35,6 +46,7 @@ import {
   createRuntimePreviewFromYaml,
   type StudioRuntimeExecutionScope,
   executeRuntimeActionFromPrompt,
+  executeRuntimeActionFromPromptAsync,
 } from "../runtime/createRuntimePreview";
 import {
   createPromptUnitOutput,
@@ -73,6 +85,8 @@ type StudioState = {
   runtimePreview: StudioRuntimePreview;
   selectedScopePromptPreview: StudioRenderedPromptPreview | null;
   latestScopeOutputs: Record<string, StudioPromptUnitOutput>;
+  nodeRuntimeStates: Record<string, NodeRuntimeState>;
+  nodeExecutionRecords: Record<string, NodeExecutionRecord>;
 
   setYamlText: (next: string) => void;
   loadPromptYaml: (yamlText: string, sourceLabel?: string) => void;
@@ -98,6 +112,9 @@ type StudioState = {
   applyGraphIntent: (intent: GraphEditIntent | BlockEditIntent) => void;
   addCanonicalNode: (kind: GraphAddableNodeKind) => void;
   removeSelectedNode: () => void;
+  runNode: (nodeId: string) => void;
+  stopNode: (nodeId: string) => void;
+  toggleNodeEnabled: (nodeId: string) => void;
 };
 
 type HydratedGraphState = {
@@ -112,8 +129,273 @@ type HydratedGraphState = {
   runtimePreview: StudioRuntimePreview;
   selectedScopePromptPreview: StudioRenderedPromptPreview | null;
   latestScopeOutputs: Record<string, StudioPromptUnitOutput>;
+  nodeRuntimeStates: Record<string, NodeRuntimeState>;
+  nodeExecutionRecords: Record<string, NodeExecutionRecord>;
   runtimeRefreshedAt: number;
 };
+
+type RuntimeNodeTarget =
+  | {
+      kind: "prompt";
+      runtimeNodeId: string;
+      scope: StudioRuntimeExecutionScope;
+    }
+  | {
+      kind: "block";
+      runtimeNodeId: string;
+      scope: StudioRuntimeExecutionScope;
+      blockId: string;
+    };
+
+type ActiveNodeExecutionHandle = {
+  executionId: string;
+  controller: AbortController;
+  timerId: ReturnType<typeof setTimeout> | null;
+  started: boolean;
+};
+
+const activeNodeExecutionHandles = new Map<string, ActiveNodeExecutionHandle>();
+const nodeExecutionRepository: NodeExecutionRepository = createInMemoryNodeExecutionRepository();
+let nextNodeExecutionSequence = 1;
+
+function getPromptRuntimeNodeId(prompt: Prompt): string {
+  return `prompt_root_${prompt.metadata.id}`;
+}
+
+function createExecutionId(): string {
+  const executionId = `node_exec_${nextNodeExecutionSequence}`;
+  nextNodeExecutionSequence += 1;
+  return executionId;
+}
+
+function listPromptBlockIds(blocks: PromptBlock[]): string[] {
+  return blocks.flatMap((block) => [block.id, ...listPromptBlockIds(block.children)]);
+}
+
+function createNodeRuntimeStates(
+  prompt: Prompt,
+  previousStates: Record<string, NodeRuntimeState> = {},
+): Record<string, NodeRuntimeState> {
+  const rootRuntimeNodeId = getPromptRuntimeNodeId(prompt);
+  const orderedNodeIds = [rootRuntimeNodeId, ...listPromptBlockIds(prompt.spec.blocks)];
+
+  return Object.fromEntries(
+    orderedNodeIds.map((nodeId) => {
+      const previous = previousStates[nodeId];
+      return [
+        nodeId,
+        {
+          nodeId,
+          status: previous?.status ?? "idle",
+          enabled: nodeId === rootRuntimeNodeId ? true : previous?.enabled ?? true,
+          ...(previous?.activeExecutionId !== undefined ? { activeExecutionId: previous.activeExecutionId } : {}),
+          ...(previous?.lastExecutionId !== undefined ? { lastExecutionId: previous.lastExecutionId } : {}),
+          ...(previous?.startedAt !== undefined ? { startedAt: previous.startedAt } : {}),
+          ...(previous?.output !== undefined ? { output: previous.output } : {}),
+          ...(previous?.lastRunAt !== undefined ? { lastRunAt: previous.lastRunAt } : {}),
+          ...(previous?.cancelRequestedAt !== undefined ? { cancelRequestedAt: previous.cancelRequestedAt } : {}),
+          ...(previous?.upstreamSnapshotHash !== undefined ? { upstreamSnapshotHash: previous.upstreamSnapshotHash } : {}),
+        },
+      ];
+    }),
+  );
+}
+
+function listPromptRuntimeNodeIds(prompt: Prompt): string[] {
+  return [getPromptRuntimeNodeId(prompt), ...listPromptBlockIds(prompt.spec.blocks)];
+}
+
+function listPersistedNodeExecutionRecords(prompt: Prompt): Record<string, NodeExecutionRecord> {
+  const runtimeNodeIds = listPromptRuntimeNodeIds(prompt);
+  nodeExecutionRepository.pruneToPrompt(prompt.metadata.id, runtimeNodeIds);
+  return Object.fromEntries(
+    nodeExecutionRepository
+      .listByPromptNodeIds(prompt.metadata.id, runtimeNodeIds)
+      .map((record) => [record.executionId, record]),
+  );
+}
+
+function hasNodeExecutionHistory(state: NodeRuntimeState): boolean {
+  return state.lastRunAt !== undefined || state.output !== undefined || state.status !== "idle";
+}
+
+function clearActiveRuntimeFields(state: NodeRuntimeState): NodeRuntimeState {
+  const { activeExecutionId: _activeExecutionId, cancelRequestedAt: _cancelRequestedAt, ...rest } = state;
+  return rest;
+}
+
+function startRuntimeState(
+  state: NodeRuntimeState,
+  executionId: string,
+  startedAt: Date,
+  sourceSnapshotHash: string,
+): NodeRuntimeState {
+  const { cancelRequestedAt: _cancelRequestedAt, ...rest } = state;
+  return {
+    ...rest,
+    status: "running",
+    activeExecutionId: executionId,
+    lastExecutionId: executionId,
+    startedAt,
+    upstreamSnapshotHash: sourceSnapshotHash,
+  };
+}
+
+function markRuntimeStateCancelRequested(state: NodeRuntimeState, requestedAt: Date): NodeRuntimeState {
+  return {
+    ...state,
+    cancelRequestedAt: state.cancelRequestedAt ?? requestedAt,
+  };
+}
+
+function completeRuntimeState(
+  state: NodeRuntimeState,
+  executionId: string,
+  completedAt: Date,
+  status: "success" | "error",
+  output?: string,
+): NodeRuntimeState {
+  const { activeExecutionId: _activeExecutionId, cancelRequestedAt: _cancelRequestedAt, ...rest } = state;
+  return {
+    ...rest,
+    status,
+    lastExecutionId: executionId,
+    lastRunAt: completedAt,
+    ...(output !== undefined ? { output } : {}),
+  };
+}
+
+function cancelRuntimeState(state: NodeRuntimeState, executionId: string): NodeRuntimeState {
+  const { activeExecutionId: _activeExecutionId, cancelRequestedAt: _cancelRequestedAt, ...rest } = state;
+  return {
+    ...rest,
+    status: state.lastRunAt || state.output ? "stale" : "idle",
+    lastExecutionId: executionId,
+  };
+}
+
+function isExecutionRecordActive(record: NodeExecutionRecord | undefined): boolean {
+  return record?.status === "running" || record?.status === "cancel_requested";
+}
+
+function invalidateNodeRuntimeStates(states: Record<string, NodeRuntimeState>): Record<string, NodeRuntimeState> {
+  return Object.fromEntries(
+    Object.entries(states).map(([nodeId, state]) => {
+      if (!hasNodeExecutionHistory(state)) {
+        return [nodeId, state];
+      }
+
+      if (state.status === "running" && state.output === undefined && state.lastRunAt === undefined) {
+        return [
+          nodeId,
+          {
+            ...clearActiveRuntimeFields(state),
+            status: "idle" as const,
+          },
+        ];
+      }
+
+      return [
+        nodeId,
+        {
+          ...clearActiveRuntimeFields(state),
+          status: "stale" as const,
+        },
+      ];
+    }),
+  );
+}
+
+function settleInterruptedExecutionRecords(
+  promptId?: string,
+  completedAt: Date = new Date(),
+): void {
+  const interruptedRecords = nodeExecutionRepository
+    .listActive(promptId)
+    .map((record) => cancelNodeExecutionRecord(requestNodeExecutionCancellation(record, completedAt), completedAt));
+  nodeExecutionRepository.putMany(interruptedRecords);
+}
+
+function clearPendingNodeExecutions(): void {
+  activeNodeExecutionHandles.forEach((handle) => {
+    if (handle.timerId) {
+      clearTimeout(handle.timerId);
+    }
+    handle.controller.abort();
+  });
+  activeNodeExecutionHandles.clear();
+}
+
+function findBlockById(blocks: PromptBlock[], blockId: string): PromptBlock | null {
+  for (const block of blocks) {
+    if (block.id === blockId) {
+      return block;
+    }
+    const nested = findBlockById(block.children, blockId);
+    if (nested) {
+      return nested;
+    }
+  }
+
+  return null;
+}
+
+function collectDescendantBlockIds(block: PromptBlock): string[] {
+  return block.children.flatMap((child) => [child.id, ...collectDescendantBlockIds(child)]);
+}
+
+function listStaleDescendantNodeIds(prompt: Prompt, target: RuntimeNodeTarget): string[] {
+  if (target.kind === "prompt") {
+    return listPromptBlockIds(prompt.spec.blocks);
+  }
+
+  const block = findBlockById(prompt.spec.blocks, target.blockId);
+  return block ? collectDescendantBlockIds(block) : [];
+}
+
+function describeRuntimePreviewOutput(preview: StudioRuntimePreview): string | undefined {
+  if (preview.issues.length > 0) {
+    return preview.issues.map((issue) => issue.message).join("\n");
+  }
+
+  return undefined;
+}
+
+function resolveRuntimeNodeTarget(state: Pick<StudioState, "canonicalPrompt" | "nodes">, nodeId: string): RuntimeNodeTarget | null {
+  const prompt = state.canonicalPrompt;
+  if (!prompt) {
+    return null;
+  }
+
+  const node = state.nodes.find((entry) => entry.id === nodeId);
+  if (!node) {
+    return null;
+  }
+
+  if (node.data.kind === "prompt") {
+    return {
+      kind: "prompt",
+      runtimeNodeId: getPromptRuntimeNodeId(prompt),
+      scope: { mode: "root" },
+    };
+  }
+
+  if (node.data.kind !== "block") {
+    return null;
+  }
+
+  const blockId = node.data.properties.__blockId ?? node.data.properties.blockId;
+  if (!blockId) {
+    return null;
+  }
+
+  return {
+    kind: "block",
+    runtimeNodeId: blockId,
+    blockId,
+    scope: { mode: "block", blockId },
+  };
+}
 
 function clonePrompt(prompt: Prompt): Prompt {
   return JSON.parse(JSON.stringify(prompt)) as Prompt;
@@ -321,6 +603,8 @@ function emptyState() {
     editorDrafts: {} as Record<string, EditorDraftSession>,
     runtimePreview: emptyRuntimePreview(),
     ...createEmptyScopeRuntimeState(),
+    nodeRuntimeStates: {} as Record<string, NodeRuntimeState>,
+    nodeExecutionRecords: {} as Record<string, NodeExecutionRecord>,
   };
 }
 
@@ -331,6 +615,7 @@ function hydrateFromCanonicalPrompt(
   editorDrafts: Record<string, EditorDraftSession>,
   latestScopeOutputs: Record<string, StudioPromptUnitOutput>,
   runtimePreview?: StudioRuntimePreview,
+  previousNodeRuntimeStates: Record<string, NodeRuntimeState> = {},
 ): HydratedGraphState {
   const graph = canonicalPromptToGraph(prompt, focusedBlockId);
   const promptSelectionId = `prompt:${prompt.metadata.id}`;
@@ -363,6 +648,8 @@ function hydrateFromCanonicalPrompt(
     runtimePreview: runtimePreview ?? createRuntimePreviewFromPrompt(prompt, "resolve"),
     selectedScopePromptPreview: scopeRuntimeState.selectedScopePromptPreview,
     latestScopeOutputs: scopeRuntimeState.latestScopeOutputs,
+    nodeRuntimeStates: createNodeRuntimeStates(prompt, previousNodeRuntimeStates),
+    nodeExecutionRecords: listPersistedNodeExecutionRecords(prompt),
     runtimeRefreshedAt: Date.now(),
   };
 }
@@ -436,11 +723,19 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         };
       }
 
+      clearPendingNodeExecutions();
+      if (state.canonicalPrompt) {
+        settleInterruptedExecutionRecords(state.canonicalPrompt.metadata.id);
+      }
       return buildPopulatedState(parsed.prompt, sourceLabel, state.selectedNodeId, parsed.runtimePreview);
     }),
 
   createStarterPrompt: (artifactType) =>
     set((state) => {
+      clearPendingNodeExecutions();
+      if (state.canonicalPrompt) {
+        settleInterruptedExecutionRecords(state.canonicalPrompt.metadata.id);
+      }
       const prompt = createStarterPrompt(artifactType);
       return buildPopulatedState(prompt, `starter://${artifactType}`, state.selectedNodeId);
     }),
@@ -480,10 +775,22 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   resetToSaved: () =>
     set((state) => {
       if (!state.savedPrompt) return {};
+      clearPendingNodeExecutions();
+      settleInterruptedExecutionRecords(state.savedPrompt.metadata.id);
       const restored = clonePrompt(state.savedPrompt);
-      const hydrated = hydrateFromCanonicalPrompt(restored, state.selectedNodeId, state.focusedBlockId, {}, {});
+      const hydrated = hydrateFromCanonicalPrompt(
+        restored,
+        state.selectedNodeId,
+        state.focusedBlockId,
+        {},
+        {},
+        undefined,
+        state.nodeRuntimeStates,
+      );
       return {
         ...hydrated,
+        nodeRuntimeStates: invalidateNodeRuntimeStates(hydrated.nodeRuntimeStates),
+        nodeExecutionRecords: hydrated.nodeExecutionRecords,
         importError: null,
         syncIssues: [],
         isDirty: false,
@@ -730,17 +1037,23 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         };
       }
 
+      clearPendingNodeExecutions();
+      settleInterruptedExecutionRecords(state.canonicalPrompt.metadata.id);
       const hydrated = hydrateFromCanonicalPrompt(
         result.prompt,
         state.selectedNodeId,
         state.focusedBlockId,
         omitDraftSession(state.editorDrafts, state.activeEditorRef),
         state.latestScopeOutputs,
+        undefined,
+        state.nodeRuntimeStates,
       );
       const isDirty = state.savedPromptDigest ? digestPrompt(result.prompt) !== state.savedPromptDigest : true;
 
       return {
         ...hydrated,
+        nodeRuntimeStates: invalidateNodeRuntimeStates(hydrated.nodeRuntimeStates),
+        nodeExecutionRecords: hydrated.nodeExecutionRecords,
         importError: null,
         syncIssues: [],
         isDirty,
@@ -893,6 +1206,8 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         };
       }
 
+      clearPendingNodeExecutions();
+      settleInterruptedExecutionRecords(state.canonicalPrompt.metadata.id);
       const nextFocusedBlockId =
         intent.type === "block.remove"
           ? state.focusedBlockId === intent.blockId
@@ -903,11 +1218,21 @@ export const useStudioStore = create<StudioState>((set, get) => ({
             : "blockId" in intent
               ? intent.blockId
               : state.focusedBlockId;
-      const hydrated = hydrateFromCanonicalPrompt(result.prompt, state.selectedNodeId, nextFocusedBlockId, state.editorDrafts, state.latestScopeOutputs);
+      const hydrated = hydrateFromCanonicalPrompt(
+        result.prompt,
+        state.selectedNodeId,
+        nextFocusedBlockId,
+        state.editorDrafts,
+        state.latestScopeOutputs,
+        undefined,
+        state.nodeRuntimeStates,
+      );
       const isDirty = state.savedPromptDigest ? digestPrompt(result.prompt) !== state.savedPromptDigest : true;
 
       return {
         ...hydrated,
+        nodeRuntimeStates: invalidateNodeRuntimeStates(hydrated.nodeRuntimeStates),
+        nodeExecutionRecords: hydrated.nodeExecutionRecords,
         importError: null,
         syncIssues: [],
         isDirty,
@@ -934,9 +1259,297 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     }
     state.applyGraphIntent({ type: "node.remove", nodeId: selectedNodeId });
   },
+
+  runNode: (nodeId) => {
+    const state = get();
+    const prompt = state.canonicalPrompt;
+    if (!prompt) {
+      return;
+    }
+
+    const target = resolveRuntimeNodeTarget(state, nodeId);
+    if (!target) {
+      return;
+    }
+
+    const currentRuntimeState = state.nodeRuntimeStates[target.runtimeNodeId];
+    if (!currentRuntimeState) {
+      return;
+    }
+
+    if (
+      isExecutionRecordActive(
+        currentRuntimeState.activeExecutionId ? nodeExecutionRepository.get(currentRuntimeState.activeExecutionId) : undefined,
+      )
+    ) {
+      return;
+    }
+
+    const existingHandle = activeNodeExecutionHandles.get(target.runtimeNodeId);
+    if (existingHandle) {
+      if (existingHandle.timerId) {
+        clearTimeout(existingHandle.timerId);
+      }
+      existingHandle.controller.abort();
+      activeNodeExecutionHandles.delete(target.runtimeNodeId);
+    }
+
+    const executionId = createExecutionId();
+    const startedAt = new Date();
+    const promptSnapshot = clonePrompt(prompt);
+    const sourceSnapshotHash = digestPrompt(promptSnapshot);
+    const targetSnapshot = target.kind === "prompt" ? target : { ...target };
+    const executionRecord = createNodeExecutionRecord({
+      executionId,
+      promptId: promptSnapshot.metadata.id,
+      nodeId: target.runtimeNodeId,
+      scope: targetSnapshot.scope,
+      sourceSnapshotHash,
+      startedAt,
+    });
+    const controller = new AbortController();
+    const handle: ActiveNodeExecutionHandle = {
+      executionId,
+      controller,
+      timerId: null,
+      started: false,
+    };
+
+    activeNodeExecutionHandles.set(target.runtimeNodeId, handle);
+    nodeExecutionRepository.put(executionRecord);
+
+    set({
+      nodeRuntimeStates: {
+        ...state.nodeRuntimeStates,
+        [target.runtimeNodeId]: startRuntimeState(currentRuntimeState, executionId, startedAt, sourceSnapshotHash),
+      },
+      nodeExecutionRecords: {
+        ...state.nodeExecutionRecords,
+        [executionId]: executionRecord,
+      },
+    });
+
+    const timerId = setTimeout(() => {
+      const activeHandle = activeNodeExecutionHandles.get(target.runtimeNodeId);
+      if (!activeHandle || activeHandle.executionId !== executionId) {
+        return;
+      }
+
+      activeHandle.timerId = null;
+      activeHandle.started = true;
+
+      void (async () => {
+        try {
+          const result = await executeRuntimeActionFromPromptAsync(
+            promptSnapshot,
+            "resolve",
+            targetSnapshot.scope,
+            { signal: controller.signal },
+          );
+          if (controller.signal.aborted) {
+            throw new Error("Execution aborted after runtime resolution.");
+          }
+
+          const executedAt = new Date();
+          const renderedPromptPreview = createRenderedPromptPreview(promptSnapshot, targetSnapshot.scope, sourceSnapshotHash);
+          const latestOutput = createPromptUnitOutput(promptSnapshot, targetSnapshot.scope, "resolve", result.preview, sourceSnapshotHash);
+          const staleDescendantIds = listStaleDescendantNodeIds(promptSnapshot, targetSnapshot);
+          const output = renderedPromptPreview.renderedText ?? describeRuntimePreviewOutput(result.preview);
+
+          set((current) => {
+            const latestRuntimeState = current.nodeRuntimeStates[target.runtimeNodeId];
+            const latestExecutionRecord = nodeExecutionRepository.get(executionId);
+            if (!latestRuntimeState || latestRuntimeState.activeExecutionId !== executionId || !latestExecutionRecord) {
+              return {};
+            }
+
+            const nextNodeRuntimeStates = { ...current.nodeRuntimeStates };
+            nextNodeRuntimeStates[target.runtimeNodeId] = completeRuntimeState(
+              latestRuntimeState,
+              executionId,
+              executedAt,
+              result.success ? "success" : "error",
+              output,
+            );
+
+            staleDescendantIds.forEach((runtimeNodeId) => {
+              const descendantState = nextNodeRuntimeStates[runtimeNodeId];
+              if (!descendantState || descendantState.status === "idle") {
+                return;
+              }
+
+              nextNodeRuntimeStates[runtimeNodeId] = {
+                ...clearActiveRuntimeFields(descendantState),
+                status: "stale",
+              };
+            });
+
+            const completedRecord = result.success
+              ? completeNodeExecutionRecord(latestExecutionRecord, { status: "success", output: output ?? "" }, executedAt)
+              : completeNodeExecutionRecord(
+                  latestExecutionRecord,
+                  {
+                    status: "error",
+                    errorMessage: result.errorSummary ?? "Node execution failed.",
+                    ...(output !== undefined ? { output } : {}),
+                  },
+                  executedAt,
+                );
+            nodeExecutionRepository.put(completedRecord);
+
+            return {
+              nodeRuntimeStates: nextNodeRuntimeStates,
+              nodeExecutionRecords: {
+                ...current.nodeExecutionRecords,
+                [executionId]: completedRecord,
+              },
+              latestScopeOutputs: {
+                ...current.latestScopeOutputs,
+                [latestOutput.scope.scopeRef]: latestOutput,
+              },
+              selectedScopePromptPreview:
+                current.selectedScopePromptPreview?.scope.scopeRef === renderedPromptPreview.scope.scopeRef
+                  ? renderedPromptPreview
+                  : current.selectedScopePromptPreview,
+            };
+          });
+        } catch (error) {
+          const activeState = get();
+          const latestRuntimeState = activeState.nodeRuntimeStates[target.runtimeNodeId];
+          const latestExecutionRecord = nodeExecutionRepository.get(executionId);
+          if (!latestRuntimeState || latestRuntimeState.activeExecutionId !== executionId || !latestExecutionRecord) {
+            return;
+          }
+
+          const cancelledAt = new Date();
+          const isAbort = controller.signal.aborted;
+          set((current) => {
+            const runtimeState = current.nodeRuntimeStates[target.runtimeNodeId];
+            const executionRecordState = nodeExecutionRepository.get(executionId);
+            if (!runtimeState || runtimeState.activeExecutionId !== executionId || !executionRecordState) {
+              return {};
+            }
+
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            const completedRecord = isAbort
+              ? cancelNodeExecutionRecord(requestNodeExecutionCancellation(executionRecordState, cancelledAt), cancelledAt)
+              : completeNodeExecutionRecord(
+                  executionRecordState,
+                  { status: "error", errorMessage },
+                  cancelledAt,
+                );
+            nodeExecutionRepository.put(completedRecord);
+
+            return {
+              nodeRuntimeStates: {
+                ...current.nodeRuntimeStates,
+                [target.runtimeNodeId]: isAbort
+                  ? cancelRuntimeState(runtimeState, executionId)
+                  : completeRuntimeState(runtimeState, executionId, cancelledAt, "error", errorMessage),
+              },
+              nodeExecutionRecords: {
+                ...current.nodeExecutionRecords,
+                [executionId]: completedRecord,
+              },
+            };
+          });
+        } finally {
+          const latestHandle = activeNodeExecutionHandles.get(target.runtimeNodeId);
+          if (latestHandle?.executionId === executionId) {
+            activeNodeExecutionHandles.delete(target.runtimeNodeId);
+          }
+        }
+      })();
+    }, 0);
+
+    handle.timerId = timerId;
+  },
+
+  stopNode: (nodeId) => {
+    const state = get();
+    const target = resolveRuntimeNodeTarget(state, nodeId);
+    if (!target) {
+      return;
+    }
+
+    const handle = activeNodeExecutionHandles.get(target.runtimeNodeId);
+    const currentRuntimeState = state.nodeRuntimeStates[target.runtimeNodeId];
+    if (!handle || !currentRuntimeState || currentRuntimeState.activeExecutionId !== handle.executionId) {
+      return;
+    }
+
+    const executionRecord = nodeExecutionRepository.get(handle.executionId);
+    if (!executionRecord) {
+      return;
+    }
+
+    const requestedAt = new Date();
+
+    if (!handle.started) {
+      if (handle.timerId) {
+        clearTimeout(handle.timerId);
+      }
+      handle.controller.abort();
+      activeNodeExecutionHandles.delete(target.runtimeNodeId);
+      const cancelledRecord = cancelNodeExecutionRecord(requestNodeExecutionCancellation(executionRecord, requestedAt), requestedAt);
+      nodeExecutionRepository.put(cancelledRecord);
+
+      set({
+        nodeRuntimeStates: {
+          ...state.nodeRuntimeStates,
+          [target.runtimeNodeId]: cancelRuntimeState(currentRuntimeState, handle.executionId),
+        },
+        nodeExecutionRecords: {
+          ...state.nodeExecutionRecords,
+          [handle.executionId]: cancelledRecord,
+        },
+      });
+      return;
+    }
+
+    handle.controller.abort();
+    const cancelRequestedRecord = requestNodeExecutionCancellation(executionRecord, requestedAt);
+    nodeExecutionRepository.put(cancelRequestedRecord);
+    set({
+      nodeRuntimeStates: {
+        ...state.nodeRuntimeStates,
+        [target.runtimeNodeId]: markRuntimeStateCancelRequested(currentRuntimeState, requestedAt),
+      },
+      nodeExecutionRecords: {
+        ...state.nodeExecutionRecords,
+        [handle.executionId]: cancelRequestedRecord,
+      },
+    });
+  },
+
+  toggleNodeEnabled: (nodeId) => {
+    const state = get();
+    const target = resolveRuntimeNodeTarget(state, nodeId);
+    if (!target || target.kind !== "block") {
+      return;
+    }
+
+    const currentState = state.nodeRuntimeStates[target.runtimeNodeId];
+    if (!currentState) {
+      return;
+    }
+
+    set({
+      nodeRuntimeStates: {
+        ...state.nodeRuntimeStates,
+        [target.runtimeNodeId]: {
+          ...currentState,
+          enabled: !currentState.enabled,
+        },
+      },
+    });
+  },
 }));
 
 export function resetStudioStoreForTests(yamlText?: string): void {
+  clearPendingNodeExecutions();
+  nodeExecutionRepository.clear();
+  nextNodeExecutionSequence = 1;
   if (!yamlText) {
     useStudioStore.setState(emptyState());
     return;

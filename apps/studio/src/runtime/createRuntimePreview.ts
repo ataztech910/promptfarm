@@ -23,6 +23,10 @@ export type StudioRuntimeActionResult = {
   errorSummary?: string;
 };
 
+export type StudioRuntimeExecutionOptions = {
+  signal?: AbortSignal;
+};
+
 export type StudioRuntimeExecutionScope =
   | { mode: "root" }
   | {
@@ -220,6 +224,25 @@ export function executeRuntimeActionFromPrompt(
       errorSummary: message,
     };
   }
+}
+
+export async function executeRuntimeActionFromPromptAsync(
+  prompt: Prompt,
+  action: StudioRuntimeAction = "resolve",
+  scope: StudioRuntimeExecutionScope = { mode: "root" },
+  options: StudioRuntimeExecutionOptions = {},
+): Promise<StudioRuntimeActionResult> {
+  if (options.signal?.aborted) {
+    throw new Error("Execution aborted before start.");
+  }
+
+  const result = executeRuntimeActionFromPrompt(prompt, action, scope);
+
+  if (options.signal?.aborted) {
+    throw new Error("Execution aborted after runtime resolution.");
+  }
+
+  return result;
 }
 
 export function createRuntimePreviewFromPrompt(
