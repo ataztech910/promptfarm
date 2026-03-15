@@ -1,0 +1,18 @@
+apiVersion: promptfarm/v1
+kind: Prompt
+metadata:
+  id: review
+  version: 1.0.0
+spec:
+  artifact:
+    type: instruction
+  inputs:
+    - name: component
+      type: string
+      required: true
+  messages:
+    - role: user
+      content: Review {{component}}.
+  use:
+    - prompt: base
+

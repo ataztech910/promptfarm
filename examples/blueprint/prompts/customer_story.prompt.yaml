@@ -1,0 +1,22 @@
+apiVersion: promptfarm/v1
+kind: Prompt
+metadata:
+  id: customer_story
+  version: 1.0.0
+  title: Customer Story
+spec:
+  artifact:
+    type: story
+  inputs:
+    - name: customer_name
+      type: string
+      required: true
+    - name: challenge
+      type: string
+      required: true
+  messages:
+    - role: user
+      content: Tell the story of {{customer_name}} solving {{challenge}}.
+  use:
+    - prompt: base
+

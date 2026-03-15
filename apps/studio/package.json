@@ -1,0 +1,38 @@
+{
+  "name": "@promptfarm/studio",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node --import tsx --test src/editor/goldenPath.test.ts src/graph/adapters/canonicalToStructureGraph.test.ts src/graph/adapters/graphSync.test.ts src/model/promptTree.test.ts src/state/studioStore.test.ts"
+  },
+  "dependencies": {
+    "@hookform/resolvers": "^5.2.2",
+    "@radix-ui/react-scroll-area": "^1.2.10",
+    "@radix-ui/react-tabs": "^1.1.13",
+    "@xyflow/react": "^12.4.3",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.577.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-hook-form": "^7.71.2",
+    "tailwind-merge": "^3.5.0",
+    "yaml": "^2.5.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.2.1",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.27",
+    "tailwindcss": "^4.2.1",
+    "typescript": "^5.5.0",
+    "vite": "^5.3.5"
+  },
+  "license": "PolyForm-Noncommercial-1.0.0"
+}

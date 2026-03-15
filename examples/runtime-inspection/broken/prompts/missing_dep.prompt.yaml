@@ -1,0 +1,15 @@
+apiVersion: promptfarm/v1
+kind: Prompt
+metadata:
+  id: missing_dep
+  version: 1.0.0
+spec:
+  artifact:
+    type: instruction
+  inputs: []
+  messages:
+    - role: user
+      content: This prompt has a missing dependency.
+  use:
+    - prompt: unknown_base
+

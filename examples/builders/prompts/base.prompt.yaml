@@ -1,0 +1,14 @@
+apiVersion: promptfarm/v1
+kind: Prompt
+metadata:
+  id: base
+  version: 1.0.0
+spec:
+  artifact:
+    type: instruction
+  inputs: []
+  messages:
+    - role: system
+      content: Use clear structure and deterministic sections.
+  use: []
+

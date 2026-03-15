@@ -1,0 +1,7 @@
+{
+  "paths": {
+    "promptsDir": "prompts",
+    "testsDir": "__tests__",
+    "distDir": "dist"
+  }
+}

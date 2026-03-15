@@ -1,0 +1,19 @@
+apiVersion: promptfarm/v1
+kind: Prompt
+metadata:
+  id: launch_story
+  version: 1.0.0
+  title: Launch Story
+spec:
+  artifact:
+    type: story
+  inputs:
+    - name: product_name
+      type: string
+      required: true
+  messages:
+    - role: user
+      content: Tell a launch story for {{product_name}}.
+  use:
+    - prompt: base
+

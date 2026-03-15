@@ -1,0 +1,62 @@
+apiVersion: promptfarm/v1
+kind: Prompt
+
+metadata:
+  id: architecture_review
+  version: 1.0.0
+  title: Architecture review
+
+spec:
+  artifact:
+    type: instruction
+
+  inputs:
+    - name: system_name
+      type: string
+      required: true
+
+  messages:
+    - role: user
+      content: |
+        Review architecture of {{system_name}}.
+        Provide trade-offs and final recommendation.
+
+  use:
+    - prompt: base
+
+  evaluation:
+    reviewerRoles:
+      - id: manager
+      - id: senior_engineer
+      - id: consultant
+
+    rubric:
+      criteria:
+        - id: correctness
+          title: Technical correctness
+          weight: 2
+          maxScore: 5
+
+        - id: actionability
+          title: Actionability
+          weight: 1
+          maxScore: 5
+
+    qualityGates:
+      - metric: overall
+        operator: ">="
+        threshold: 0
+
+      - metric: criterion
+        criterionId: correctness
+        operator: ">="
+        threshold: 0
+
+      - metric: reviewer_verdict
+        reviewerId: senior_engineer
+        requiredVerdict: pass
+
+  buildTargets:
+    - id: markdown
+      format: md
+      outputPath: dist/architecture_review.md

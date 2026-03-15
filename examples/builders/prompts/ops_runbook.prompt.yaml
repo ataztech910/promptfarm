@@ -1,0 +1,19 @@
+apiVersion: promptfarm/v1
+kind: Prompt
+metadata:
+  id: ops_runbook
+  version: 1.0.0
+  title: Ops Runbook
+spec:
+  artifact:
+    type: instruction
+  inputs:
+    - name: system_name
+      type: string
+      required: true
+  messages:
+    - role: user
+      content: Create an operational runbook for {{system_name}}.
+  use:
+    - prompt: base
+
