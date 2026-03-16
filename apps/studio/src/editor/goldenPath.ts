@@ -41,6 +41,8 @@ export type PaletteGroup = {
   }>;
 };
 
+let starterPromptSequence = 0;
+
 function titleCaseArtifact(artifactType: ArtifactType): string {
   if (artifactType === ArtifactType.BookText) return "Book";
   if (artifactType === ArtifactType.Instruction) return "Instruction";
@@ -65,9 +67,16 @@ function starterSystemMessageForArtifact(artifactType: ArtifactType): string {
   return "You produce precise step-by-step instruction artifacts.";
 }
 
+function createStarterPromptId(artifactType: ArtifactType): string {
+  starterPromptSequence += 1;
+  const timePart = Date.now().toString(36);
+  const sequencePart = starterPromptSequence.toString(36);
+  return `new_${artifactType}_prompt_${timePart}_${sequencePart}`;
+}
+
 export function createStarterPrompt(artifactType: StarterArtifactChoice): Prompt {
   const label = titleCaseArtifact(artifactType);
-  const promptId = `new_${artifactType}_prompt`;
+  const promptId = createStarterPromptId(artifactType);
 
   return PromptSchema.parse({
     apiVersion: "promptfarm/v1",

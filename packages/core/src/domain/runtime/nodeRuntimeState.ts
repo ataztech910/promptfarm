@@ -15,6 +15,10 @@ export const NodeExecutionLifecycleStatusSchema = z.enum([
 
 export type NodeExecutionLifecycleStatus = z.infer<typeof NodeExecutionLifecycleStatusSchema>;
 
+export const NodeExecutionModeSchema = z.enum(["text", "structure"]);
+
+export type NodeExecutionMode = z.infer<typeof NodeExecutionModeSchema>;
+
 export const NodeExecutionScopeSchema = z.discriminatedUnion("mode", [
   z
     .object({
@@ -54,6 +58,7 @@ export const NodeExecutionRecordSchema = z
     promptId: IdentifierSchema,
     nodeId: IdentifierSchema,
     scope: NodeExecutionScopeSchema,
+    mode: NodeExecutionModeSchema.optional(),
     status: NodeExecutionLifecycleStatusSchema,
     sourceSnapshotHash: z.string(),
     startedAt: z.date(),
@@ -63,6 +68,8 @@ export const NodeExecutionRecordSchema = z
     errorMessage: z.string().optional(),
     provider: z.string().min(1).optional(),
     model: z.string().min(1).optional(),
+    finishReason: z.string().min(1).optional(),
+    executionTimeMs: z.number().nonnegative().optional(),
   })
   .strict();
 

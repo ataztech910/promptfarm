@@ -28,3 +28,6 @@ export * from "./core/reporting/runtimeReport.js";
 
 export * from "./core/nodeExecution.js";
 export * from "./core/nodeExecutionRepository.js";
+export * from "./llm/types.js";
+export * from "./llm/openaiCompatible.js";
+export * from "./llm/scopedExecution.js";

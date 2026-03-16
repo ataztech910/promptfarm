@@ -23,10 +23,16 @@ export type StudioNodeData = {
   title: string;
   description: string;
   properties: Record<string, string>;
+  graphState?: "canonical" | "proposal";
+  proposalId?: string;
+  sourceNodeId?: string;
 };
 
 export type StudioFlowNode = Node<StudioNodeData, StudioNodeKind>;
-export type StudioFlowEdge = Edge;
+export type StudioFlowEdge = Edge<{
+  graphState?: "canonical" | "proposal";
+  proposalId?: string;
+}>;
 
 export type StudioGraph = {
   nodes: StudioFlowNode[];
@@ -68,11 +74,54 @@ export type StudioRenderedPromptPreview = {
 export type StudioPromptUnitOutput = {
   scope: StudioScopeDescriptor;
   action: StudioRuntimeAction;
-  contentType: "resolved_artifact" | "evaluation" | "blueprint" | "build_output" | "runtime_issues";
+  contentType:
+    | "generated_output"
+    | "graph_proposal"
+    | "resolved_artifact"
+    | "evaluation"
+    | "blueprint"
+    | "build_output"
+    | "runtime_issues";
   content: unknown;
   issues: RuntimeIssue[];
   generatedAt: number;
   sourceSnapshotHash: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type StudioNodeResultKind = "text_result" | "graph_proposal";
+
+export type StudioGraphProposalBlock = {
+  proposalNodeId: string;
+  parentProposalNodeId: string | null;
+  kind: PromptBlockKind;
+  title: string;
+  description: string;
+  instruction: string;
+  children: StudioGraphProposalBlock[];
+};
+
+export type StudioGraphProposal = {
+  proposalId: string;
+  sourceNodeId: string;
+  sourceRuntimeNodeId: string;
+  scope: StudioScopeDescriptor;
+  executionId: string;
+  status: "preview" | "applied" | "rejected";
+  summary: string;
+  warnings?: string[];
+  blocks: StudioGraphProposalBlock[];
+  createdAt: number;
+};
+
+export type StudioNodeResultHistoryEntry = {
+  historyEntryId: string;
+  nodeId: string;
+  executionId: string;
+  resultKind: StudioNodeResultKind;
+  output: StudioPromptUnitOutput;
+  createdAt: number;
+  active: boolean;
 };
 
 export type CanonicalPromptDocument = Prompt;

@@ -6,6 +6,7 @@ import {
 } from "@promptfarm/core";
 import { getPromptBlockPath } from "../model/promptTree";
 import type {
+  StudioGraphProposal,
   StudioPromptUnitOutput,
   StudioRenderedPromptPreview,
   StudioRuntimeAction,
@@ -159,5 +160,47 @@ export function createPromptUnitOutput(
     issues: preview.issues,
     generatedAt: Date.now(),
     sourceSnapshotHash,
+  };
+}
+
+export function createGeneratedNodeOutput(input: {
+  prompt: Prompt;
+  scope: StudioRuntimeExecutionScope;
+  sourceSnapshotHash: string;
+  content: string;
+  metadata?: Record<string, unknown>;
+}): StudioPromptUnitOutput {
+  return {
+    scope: createScopeDescriptor(input.prompt, input.scope),
+    action: "resolve",
+    contentType: "generated_output",
+    content: input.content,
+    issues: [],
+    generatedAt: Date.now(),
+    sourceSnapshotHash: input.sourceSnapshotHash,
+    ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
+  };
+}
+
+export function createGraphProposalNodeOutput(input: {
+  prompt: Prompt;
+  scope: StudioRuntimeExecutionScope;
+  sourceSnapshotHash: string;
+  proposal: StudioGraphProposal;
+  metadata?: Record<string, unknown>;
+}): StudioPromptUnitOutput {
+  return {
+    scope: createScopeDescriptor(input.prompt, input.scope),
+    action: "resolve",
+    contentType: "graph_proposal",
+    content: input.proposal,
+    issues: [],
+    generatedAt: Date.now(),
+    sourceSnapshotHash: input.sourceSnapshotHash,
+    metadata: {
+      proposalId: input.proposal.proposalId,
+      summary: input.proposal.summary,
+      ...(input.metadata ?? {}),
+    },
   };
 }

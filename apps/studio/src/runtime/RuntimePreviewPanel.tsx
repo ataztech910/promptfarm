@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp, ChevronsUpDown, RefreshCcw, X } from "lucide-react";
+import { Braces, ChevronDown, ChevronUp, ChevronsUpDown, FileText, RefreshCcw, Sparkles, X } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { ScrollArea } from "../components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
@@ -6,6 +6,28 @@ import { cn } from "../lib/cn";
 import { useStudioStore } from "../state/studioStore";
 
 export type RuntimeConsoleState = "hidden" | "compact" | "expanded";
+
+function eventCategoryPresentation(category: "text" | "structure" | "system") {
+  if (category === "text") {
+    return {
+      label: "text",
+      className: "border-emerald-300/60 bg-emerald-50/70 text-emerald-900",
+      icon: FileText,
+    };
+  }
+  if (category === "structure") {
+    return {
+      label: "structure",
+      className: "border-amber-300/60 bg-amber-50/70 text-amber-900",
+      icon: Braces,
+    };
+  }
+  return {
+    label: "system",
+    className: "border-border bg-background/70 text-muted-foreground",
+    icon: Sparkles,
+  };
+}
 
 function JsonViewer({ value }: { value: unknown }) {
   return (
@@ -29,6 +51,7 @@ type RuntimePreviewPanelProps = {
 
 export function RuntimePreviewPanel({ state, onChangeState }: RuntimePreviewPanelProps) {
   const preview = useStudioStore((s) => s.runtimePreview);
+  const consoleEvents = useStudioStore((s) => s.consoleEvents);
   const refreshRuntimePreview = useStudioStore((s) => s.refreshRuntimePreview);
   const runtimeRefreshedAt = useStudioStore((s) => s.runtimeRefreshedAt);
   const executionStatus = useStudioStore((s) => s.executionStatus);
@@ -45,6 +68,7 @@ export function RuntimePreviewPanel({ state, onChangeState }: RuntimePreviewPane
       : "root";
   const bodyVisible = state !== "hidden";
   const selectedScopeOutput = selectedScopePromptPreview ? latestScopeOutputs[selectedScopePromptPreview.scope.scopeRef] ?? null : null;
+  const latestConsoleEvent = consoleEvents[consoleEvents.length - 1] ?? null;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -70,6 +94,11 @@ export function RuntimePreviewPanel({ state, onChangeState }: RuntimePreviewPane
             <p className="truncate text-[11px] text-muted-foreground">
               status={executionStatus} action={lastRuntimeAction ?? "none"} scope={scopeLabel} lastRun={lastRunText}
             </p>
+            {!bodyVisible && latestConsoleEvent ? (
+              <p className="truncate text-[11px] text-muted-foreground">
+                [{latestConsoleEvent.category}] {latestConsoleEvent.message}
+              </p>
+            ) : null}
             {!bodyVisible && runtimeErrorSummary ? <p className="truncate text-[11px] text-destructive">{runtimeErrorSummary}</p> : null}
           </div>
         </button>
@@ -103,6 +132,7 @@ export function RuntimePreviewPanel({ state, onChangeState }: RuntimePreviewPane
             <TabsList className="w-fit">
               <TabsTrigger value="selected-prompt">Selected Prompt</TabsTrigger>
               <TabsTrigger value="selected-output">Selected Output</TabsTrigger>
+              <TabsTrigger value="activity">Activity</TabsTrigger>
               <TabsTrigger value="resolved">resolvedArtifact</TabsTrigger>
               <TabsTrigger value="evaluation">evaluation</TabsTrigger>
               <TabsTrigger value="blueprint">blueprint</TabsTrigger>
@@ -111,7 +141,11 @@ export function RuntimePreviewPanel({ state, onChangeState }: RuntimePreviewPane
             </TabsList>
 
             <div className="mt-2 min-h-0 flex-1">
-              {runtimeErrorSummary ? <p className="mb-2 text-[11px] text-destructive">{runtimeErrorSummary}</p> : null}
+              {runtimeErrorSummary ? (
+                <pre className="mb-2 max-h-32 overflow-auto rounded-md border border-destructive/30 bg-destructive/5 p-2 text-[11px] whitespace-pre-wrap text-destructive">
+                  {runtimeErrorSummary}
+                </pre>
+              ) : null}
               <ScrollArea className="h-full rounded-md">
                 <TabsContent value="selected-prompt" className="mt-0">
                   {selectedScopePromptPreview ? (
@@ -140,12 +174,57 @@ export function RuntimePreviewPanel({ state, onChangeState }: RuntimePreviewPane
                         <div>Scope: {selectedScopeOutput.scope.label}</div>
                         <div>Action: {selectedScopeOutput.action}</div>
                         <div>Type: {selectedScopeOutput.contentType}</div>
+                        {selectedScopeOutput.metadata?.provider ? <div>Provider: {String(selectedScopeOutput.metadata.provider)}</div> : null}
+                        {selectedScopeOutput.metadata?.model ? <div>Model: {String(selectedScopeOutput.metadata.model)}</div> : null}
+                        {selectedScopeOutput.metadata?.executionTimeMs ? (
+                          <div>Latency: {String(selectedScopeOutput.metadata.executionTimeMs)}ms</div>
+                        ) : null}
                       </div>
+                      {selectedScopeOutput.contentType === "graph_proposal" ? (
+                        <div className="rounded-md border border-amber-300/40 bg-amber-50/40 px-2 py-2 text-xs text-muted-foreground">
+                          This output is a structure proposal preview, not generated text content.
+                        </div>
+                      ) : null}
                       <ValueViewer value={selectedScopeOutput.content} />
                       {selectedScopeOutput.issues.length > 0 ? <JsonViewer value={selectedScopeOutput.issues} /> : null}
                     </div>
                   ) : (
                     <p className="text-xs text-muted-foreground">No stored output for the selected scope.</p>
+                  )}
+                </TabsContent>
+                <TabsContent value="activity" className="mt-0">
+                  {consoleEvents.length > 0 ? (
+                    <div className="space-y-2">
+                      {consoleEvents
+                        .slice()
+                        .reverse()
+                        .map((event) => (
+                          <div key={event.eventId} className="rounded-md border border-border bg-muted/20 px-2 py-2 text-xs">
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="flex items-center gap-2">
+                                {(() => {
+                                  const presentation = eventCategoryPresentation(event.category);
+                                  const Icon = presentation.icon;
+                                  return (
+                                    <>
+                                      <span className={cn("inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wide", presentation.className)}>
+                                        <Icon className="h-3 w-3" />
+                                        {presentation.label}
+                                      </span>
+                                      <span className="uppercase tracking-wide text-muted-foreground">{event.status}</span>
+                                    </>
+                                  );
+                                })()}
+                              </div>
+                              <span className="text-muted-foreground">{new Date(event.createdAt).toLocaleTimeString()}</span>
+                            </div>
+                            <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap text-foreground/90">{event.message}</pre>
+                            {event.scopeRef ? <div className="mt-1 text-muted-foreground">Scope: {event.scopeRef}</div> : null}
+                          </div>
+                        ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">No console activity yet.</p>
                   )}
                 </TabsContent>
                 <TabsContent value="resolved" className="mt-0">

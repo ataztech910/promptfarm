@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import {
   Boxes,
   Braces,
@@ -24,6 +25,7 @@ import { cn } from "../lib/cn";
 import { getPromptBlockPath } from "../model/promptTree";
 import type { RuntimeConsoleState } from "../runtime/RuntimePreviewPanel";
 import { useStudioStore } from "../state/studioStore";
+import { useStudioAuth } from "../auth/StudioAuthProvider";
 
 function downloadTextAsFile(filename: string, contents: string): void {
   const blob = new Blob([contents], { type: "application/yaml;charset=utf-8" });
@@ -78,14 +80,19 @@ export function StudioToolbar({
   const isDirty = useStudioStore((s) => s.isDirty);
   const hasYamlDraftChanges = useStudioStore((s) => s.hasYamlDraftChanges);
   const sourceLabel = useStudioStore((s) => s.sourceLabel);
+  const currentProjectId = useStudioStore((s) => s.currentProjectId);
+  const currentProjectName = useStudioStore((s) => s.currentProjectName);
   const focusedBlockId = useStudioStore((s) => s.focusedBlockId);
   const runRuntimeAction = useStudioStore((s) => s.runRuntimeAction);
   const runFocusedBlockRuntimeAction = useStudioStore((s) => s.runFocusedBlockRuntimeAction);
   const focusBlock = useStudioStore((s) => s.focusBlock);
   const { fitView } = useReactFlow();
+  const navigate = useNavigate();
+  const { user, logOut } = useStudioAuth();
 
   const focusedPath = canonicalPrompt && focusedBlockId ? getPromptBlockPath(canonicalPrompt.spec.blocks, focusedBlockId) : [];
-  const projectName = canonicalPrompt?.metadata.title?.trim() || sourceLabel || "PromptFarm Studio";
+  const promptLabel = canonicalPrompt?.metadata.title?.trim() || sourceLabel || "PromptFarm Studio";
+  const projectLabel = currentProjectName?.trim() || currentProjectId;
   const currentScope = focusedBlockId ? "block" : "root";
   const breadcrumbText = focusedPath.length > 0 ? focusedPath.map((block) => block.title).join(" / ") : "Root Prompt";
   const consoleLabel =
@@ -127,8 +134,9 @@ export function StudioToolbar({
         <div className="flex min-w-0 flex-1 flex-col gap-2">
           <div className="flex min-w-0 items-center gap-2">
             <LayoutGrid className="h-4 w-4 shrink-0 text-primary" />
-            <span className="truncate text-sm font-semibold tracking-wide">{projectName}</span>
+            <span className="truncate text-sm font-semibold tracking-wide">{promptLabel}</span>
             <Badge className={currentScope === "block" ? "text-amber-300" : "text-emerald-300"}>{currentScope}</Badge>
+            {projectLabel ? <Badge className="text-sky-300">Project {projectLabel}</Badge> : null}
             {canonicalPrompt ? (
               <Badge className={isDirty ? "text-amber-300" : "text-emerald-300"}>{isDirty ? "Unsaved changes" : "Saved"}</Badge>
             ) : (
@@ -148,6 +156,7 @@ export function StudioToolbar({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {user ? <Badge className="bg-transparent">{user.email}</Badge> : null}
           <Badge className="gap-1 bg-transparent">
             <FileInput className="h-3.5 w-3.5" />
             Nodes {nodeCount}
@@ -235,6 +244,25 @@ export function StudioToolbar({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => void navigate({ to: "/studio" })}>
+            Studio
+          </Button>
+          {currentProjectId ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                void navigate({
+                  to: "/studio/projects/$projectId",
+                  params: {
+                    projectId: currentProjectId,
+                  },
+                })
+              }
+            >
+              Project
+            </Button>
+          ) : null}
           <div className="inline-flex items-center rounded-md border border-border bg-muted/30 p-1">
             <Button variant={viewMode === "focus" ? "secondary" : "ghost"} size="sm" onClick={() => onViewModeChange("focus")}>
               Focus
@@ -254,6 +282,15 @@ export function StudioToolbar({
           <Button variant="outline" size="sm" onClick={() => fitView({ padding: 0.25, duration: 250 })} disabled={!canonicalPrompt}>
             <ScanSearch className="h-3.5 w-3.5" />
             Fit
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              void logOut();
+            }}
+          >
+            Logout
           </Button>
           <input
             ref={fileInputRef}

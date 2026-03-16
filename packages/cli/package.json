@@ -9,15 +9,17 @@
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
-    "test": "npm run test:cli-runtime && npm run test:runtime-polish && npm run test:integration",
+    "test": "npm run test:cli-runtime && npm run test:runtime-polish && npm run test:server && npm run test:integration",
     "validate": "tsx src/main.ts validate",
     "resolve": "tsx src/main.ts resolve",
     "doctor": "tsx src/main.ts doctor",
     "evaluate": "tsx src/main.ts evaluate",
     "blueprint": "tsx src/main.ts blueprint",
+    "serve": "tsx src/main.ts serve",
     "build:prompts": "tsx src/main.ts build",
     "list": "tsx src/main.ts list",
     "render": "tsx src/main.ts render",
+    "test:server": "node --import tsx --test src/server/studioAuthRepository.test.ts src/server/studioAuthService.test.ts src/server/studioProjectRepository.test.ts src/server/studioProjectService.test.ts src/server/studioPromptDocumentRepository.test.ts src/server/studioPromptDocumentService.test.ts src/server/studioPromptRuntimeRepository.test.ts src/server/studioPromptRuntimeService.test.ts src/server/studioExecutionService.test.ts src/server/studioServer.test.ts",
     "test:integration": "node --import tsx --test src/commands/evaluate.integration.test.ts src/commands/blueprint.integration.test.ts src/commands/build.integration.test.ts src/commands/resolve.integration.test.ts src/commands/doctor.integration.test.ts",
     "test:cli-runtime": "node --import tsx --test src/commands/runtimeCli.integration.test.ts",
     "test:runtime-polish": "node --import tsx --test src/commands/resolve.integration.test.ts src/commands/doctor.integration.test.ts"
