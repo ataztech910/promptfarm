@@ -5,21 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.0]
-
-### Added
-- Node execution layer for root and block nodes in Studio.
-- Per-node runtime state with status, output, enable/disable state, timestamps, and stale propagation.
-- Execution ledger foundation with `executionId`, lifecycle records, and in-memory execution repository.
-- Node-scoped run/stop controls in the graph and inspector UI.
-- Core node execution utilities and tests in `@promptfarm/core`.
-
-### Changed
-- Extended core domain models with `NodeRuntimeState`, `NodeExecutionResult`, and `NodeExecutionRecord`.
-- Added cancellation request semantics (`cancel_requested`) as groundwork for later provider and persistence integration.
-- Clarified next-iteration sprint boundaries so DB-backed execution storage and reload-safe cancellation move to persistence/runtime infrastructure sprints.
-
 ## [Unreleased]
+
+## [0.5.0] - 2026-03-17
 
 ### Added
 - Graph proposal preview layer with proposal nodes, dashed edges, and apply/reject flows in Studio.
@@ -46,15 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Node workspace actions are now centralized in a dedicated action bar, and the right pane has been simplified to result-only `Prompt / Rendered` tabs.
 - Editor.js is now integrated into the left prompt-authoring pane with initial custom prompt block tools and adapter-based sync back to canonical prompt messages.
 - Prompt block authoring now includes a popup block picker, native drag-and-drop reorder, and delete confirmation for non-empty prompt blocks.
-
-### Changed
-- Focus and structure graph views now handle proposal overlays separately instead of collapsing into a single full-graph view.
-- Proposal parsing is more tolerant of loose OpenAI-compatible / Ollama JSON responses and common artifact-specific kind mismatches.
-- Draft edits are auto-applied before message suggestion, structure generation, and node text generation.
-- Studio now distinguishes text generation and structure generation in inspector actions and runtime activity logs.
-- Inspector now shows proposal failure recovery affordances, and node text runs warn when preview structure proposals are still unapplied.
-
-### Added
+- Root dependency management in the Prompt Tree with attach, hide/show, and detach flows.
+- Structured skill-style `Rendered Prompt` preview in Studio with dependency sections, root/scope objective, scope tree, and runtime additions.
 - Node-side SQLite-backed execution repository in `@promptfarm/core/node` with durable execution record persistence.
 - `DATABASE_URL` resolution for default local SQLite and future Postgres-backed persistence wiring.
 - Repository strategy/factory layer for swapping persistence providers without changing call sites.
@@ -63,13 +44,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - HTTP mirror/hydrate bridge for Studio prompt-runtime persistence, ready for a later worker/API backend.
 - Backend prompt summaries now carry a nullable `projectId` slot as Sprint 5 groundwork without changing the current prompt-first UX.
 
+### Changed
+- Focus and structure graph views now handle proposal overlays separately instead of collapsing into a single full-graph view.
+- Proposal parsing is more tolerant of loose OpenAI-compatible / Ollama JSON responses and common artifact-specific kind mismatches.
+- Draft edits are auto-applied before message suggestion, structure generation, and node text generation.
+- Studio now distinguishes text generation and structure generation in inspector actions and runtime activity logs.
+- Inspector now shows proposal failure recovery affordances, and node text runs warn when preview structure proposals are still unapplied.
+- Studio removed the legacy `Advanced Tools` left-panel flow in favor of tree-first structure and dependency management.
+- Root prompt preview now resolves visible tree content and attached visible dependencies as the effective active prompt.
+- Node workspace action labeling now uses `Generate Output` for selected-scope text generation.
+- `Rendered Prompt` now renders from canonical prompt state in a structured model-friendly format instead of a flat legacy message dump.
+
+## [0.4.0]
+
+### Added
+- Node execution layer for root and block nodes in Studio.
+- Per-node runtime state with status, output, enable/disable state, timestamps, and stale propagation.
+- Execution ledger foundation with `executionId`, lifecycle records, and in-memory execution repository.
+- Node-scoped run/stop controls in the graph and inspector UI.
+- Core node execution utilities and tests in `@promptfarm/core`.
+
+### Changed
+- Extended core domain models with `NodeRuntimeState`, `NodeExecutionResult`, and `NodeExecutionRecord`.
+- Added cancellation request semantics (`cancel_requested`) as groundwork for later provider and persistence integration.
+- Clarified next-iteration sprint boundaries so DB-backed execution storage and reload-safe cancellation move to persistence/runtime infrastructure sprints.
+
 ## [0.3.0]
 
 ### Added
-- Studio app foundation (from penultimate commit: [commit-hash] - brief description of studio changes, e.g., initial UI components or routing setup).
+- Studio app foundation with the initial `apps/studio` workspace and monorepo integration.
 
 ### Changed
 - Updated monorepo structure to include `apps/studio/`.
-
-### Fixed
-- Any bugs addressed in related commits.

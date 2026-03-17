@@ -41,6 +41,7 @@ examples/
 - `apps/studio`: optional visual client foundation (future-facing)
   - not required for engine usage
   - not the source of truth
+  - tree-first prompt authoring with root dependencies and scope previews
 
 `docs/` and `examples/` remain at repository root.
 
@@ -131,6 +132,14 @@ npm run build:prompts -- --cwd examples/builders --format json
 ```bash
 npm run studio:dev
 ```
+
+Current Studio authoring model:
+
+- Prompt Tree is the primary structure editor
+- prompt dependencies attach at the root and appear in the tree
+- `Rendered Prompt` shows a structured skill-style preview
+- selected scopes generate text with `Generate Output`
+- Studio remains a projection over canonical YAML/domain state
 
 ## Documentation
 

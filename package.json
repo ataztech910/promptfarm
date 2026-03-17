@@ -1,7 +1,7 @@
 {
   "name": "promptfarm-workspace",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.5.0",
   "description": "PromptFarm monorepo workspace",
   "packageManager": "pnpm@9.0.0",
   "scripts": {
