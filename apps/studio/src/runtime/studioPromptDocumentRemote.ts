@@ -1,5 +1,7 @@
 import { PromptSchema, type Prompt } from "@promptfarm/core";
 
+const STUDIO_PROMPT_DOCUMENT_CACHE_PREFIX = "promptfarm.studio.promptDocument.";
+
 export type StudioPromptDocumentSummary = {
   promptId: string;
   projectId: string | null;
@@ -39,6 +41,20 @@ type StudioPromptDocumentRemoteTransport = (input: {
 let remoteTransportOverride: StudioPromptDocumentRemoteTransport | undefined;
 let remoteConfigOverride: StudioPromptDocumentRemoteConfig | undefined;
 
+type StudioPromptDocumentLocalCacheAdapter = {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+};
+
+type SerializedStudioPromptDocumentRecord = {
+  version: 1;
+  prompt: Prompt;
+  summary: StudioPromptDocumentSummary;
+};
+
+let localCacheAdapterOverride: StudioPromptDocumentLocalCacheAdapter | undefined;
+
 function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
 }
@@ -54,6 +70,144 @@ function readBrowserOrigin(): string | undefined {
 function readEnvValue(name: "VITE_STUDIO_PROMPT_REMOTE_URL" | "VITE_STUDIO_PERSISTENCE_REMOTE_URL"): string | undefined {
   const value = import.meta.env?.[name];
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function canUseLocalStorage(): boolean {
+  return typeof globalThis !== "undefined" && "localStorage" in globalThis && globalThis.localStorage !== null;
+}
+
+function getLocalCacheAdapter(): StudioPromptDocumentLocalCacheAdapter | null {
+  if (localCacheAdapterOverride) {
+    return localCacheAdapterOverride;
+  }
+  if (!canUseLocalStorage()) {
+    return null;
+  }
+  return globalThis.localStorage;
+}
+
+function buildPromptDocumentLocalCacheKey(promptId: string): string {
+  return `${STUDIO_PROMPT_DOCUMENT_CACHE_PREFIX}${promptId}`;
+}
+
+function normalizePromptDocumentSummary(summary: Record<string, unknown>): StudioPromptDocumentSummary | null {
+  if (
+    typeof summary.promptId !== "string" ||
+    (summary.projectId !== null && typeof summary.projectId !== "string") ||
+    ("projectName" in summary && summary.projectName !== null && typeof summary.projectName !== "string") ||
+    typeof summary.title !== "string" ||
+    typeof summary.artifactType !== "string" ||
+    typeof summary.updatedAt !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    promptId: summary.promptId,
+    projectId: (summary.projectId ?? null) as string | null,
+    projectName: (summary.projectName ?? null) as string | null,
+    title: summary.title,
+    artifactType: summary.artifactType as Prompt["spec"]["artifact"]["type"],
+    updatedAt: summary.updatedAt,
+  };
+}
+
+function readStudioPromptDocumentFromLocalCache(promptId: string): StudioPromptDocumentRecord | null {
+  const adapter = getLocalCacheAdapter();
+  if (!adapter) {
+    return null;
+  }
+
+  try {
+    const serialized = adapter.getItem(buildPromptDocumentLocalCacheKey(promptId));
+    if (!serialized) {
+      return null;
+    }
+
+    const payload = JSON.parse(serialized) as unknown;
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      return null;
+    }
+
+    const parsed = payload as Partial<SerializedStudioPromptDocumentRecord>;
+    if (parsed.version !== 1 || !parsed.summary) {
+      return null;
+    }
+
+    const prompt = PromptSchema.parse(parsed.prompt);
+    const summary = normalizePromptDocumentSummary(parsed.summary as Record<string, unknown>);
+    if (!summary || summary.promptId !== promptId || prompt.metadata.id !== promptId) {
+      return null;
+    }
+
+    return {
+      prompt,
+      summary,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function readStudioPromptDocumentFromLocalCacheSnapshot(promptId: string): StudioPromptDocumentRecord | null {
+  return readStudioPromptDocumentFromLocalCache(promptId);
+}
+
+function writeStudioPromptDocumentToLocalCache(record: StudioPromptDocumentRecord): void {
+  const adapter = getLocalCacheAdapter();
+  if (!adapter) {
+    return;
+  }
+
+  const payload: SerializedStudioPromptDocumentRecord = {
+    version: 1,
+    prompt: record.prompt,
+    summary: record.summary,
+  };
+  adapter.setItem(buildPromptDocumentLocalCacheKey(record.prompt.metadata.id), JSON.stringify(payload));
+}
+
+function clearStudioPromptDocumentFromLocalCache(promptId: string): void {
+  const adapter = getLocalCacheAdapter();
+  if (!adapter) {
+    return;
+  }
+  adapter.removeItem(buildPromptDocumentLocalCacheKey(promptId));
+}
+
+function chooseNewerPromptDocumentRecord(
+  remoteRecord: StudioPromptDocumentRecord | null,
+  localRecord: StudioPromptDocumentRecord | null,
+): StudioPromptDocumentRecord | null {
+  if (!remoteRecord) {
+    return localRecord;
+  }
+  if (!localRecord) {
+    return remoteRecord;
+  }
+
+  const remoteUpdatedAt = Date.parse(remoteRecord.summary.updatedAt);
+  const localUpdatedAt = Date.parse(localRecord.summary.updatedAt);
+
+  if (!Number.isFinite(remoteUpdatedAt) || !Number.isFinite(localUpdatedAt)) {
+    return localRecord;
+  }
+
+  return localUpdatedAt > remoteUpdatedAt ? localRecord : remoteRecord;
+}
+
+function createPromptDocumentRecord(input: { prompt: Prompt; projectId?: string | null; projectName?: string | null; updatedAt?: string }): StudioPromptDocumentRecord {
+  return {
+    prompt: input.prompt,
+    summary: {
+      promptId: input.prompt.metadata.id,
+      projectId: input.projectId ?? null,
+      projectName: input.projectName ?? null,
+      title: input.prompt.metadata.title ?? input.prompt.metadata.id,
+      artifactType: input.prompt.spec.artifact.type,
+      updatedAt: input.updatedAt ?? new Date().toISOString(),
+    },
+  };
 }
 
 function getStudioPromptDocumentRemoteConfig(): StudioPromptDocumentRemoteConfig {
@@ -174,9 +328,10 @@ export async function readStudioPromptDocumentFromRemote(
   promptId: string,
   transport: StudioPromptDocumentRemoteTransport = remoteTransportOverride ?? defaultRemoteTransport,
 ): Promise<StudioPromptDocumentRecord | null> {
+  const localRecord = readStudioPromptDocumentFromLocalCache(promptId);
   const config = getStudioPromptDocumentRemoteConfig();
   if (config.mode !== "http") {
-    return null;
+    return localRecord;
   }
 
   const response = await transport({
@@ -190,7 +345,7 @@ export async function readStudioPromptDocumentFromRemote(
   });
 
   if (response.status === 404) {
-    return null;
+    return localRecord;
   }
 
   if (!response.ok) {
@@ -215,37 +370,42 @@ export async function readStudioPromptDocumentFromRemote(
     ) {
       throw new Error("Studio prompt document read returned an invalid summary payload.");
     }
-    return {
+    const summary = normalizePromptDocumentSummary(summaryPayload);
+    if (!summary) {
+      throw new Error("Studio prompt document read returned an invalid summary payload.");
+    }
+    const remoteRecord = {
       prompt,
-      summary: {
-        promptId: summaryPayload.promptId,
-        projectId: (summaryPayload.projectId ?? null) as string | null,
-        projectName: (summaryPayload.projectName ?? null) as string | null,
-        title: summaryPayload.title,
-        artifactType: summaryPayload.artifactType as Prompt["spec"]["artifact"]["type"],
-        updatedAt: summaryPayload.updatedAt,
-      },
+      summary,
     };
+    const preferredRecord = chooseNewerPromptDocumentRecord(remoteRecord, localRecord);
+    if (preferredRecord) {
+      writeStudioPromptDocumentToLocalCache(preferredRecord);
+    }
+    return preferredRecord;
   }
 
   const prompt = PromptSchema.parse(payload);
-  return {
+  const remoteRecord = createPromptDocumentRecord({
     prompt,
-    summary: {
-      promptId: prompt.metadata.id,
-      projectId: null,
-      projectName: null,
-      title: prompt.metadata.title ?? prompt.metadata.id,
-      artifactType: prompt.spec.artifact.type,
-      updatedAt: new Date().toISOString(),
-    },
-  };
+  });
+  const preferredRecord = chooseNewerPromptDocumentRecord(remoteRecord, localRecord);
+  if (preferredRecord) {
+    writeStudioPromptDocumentToLocalCache(preferredRecord);
+  }
+  return preferredRecord;
 }
 
 export async function writeStudioPromptDocumentToRemote(
   input: { prompt: Prompt; projectId?: string | null },
   transport: StudioPromptDocumentRemoteTransport = remoteTransportOverride ?? defaultRemoteTransport,
 ): Promise<void> {
+  writeStudioPromptDocumentToLocalCache(
+    createPromptDocumentRecord({
+      prompt: input.prompt,
+      projectId: input.projectId ?? null,
+    }),
+  );
   const config = getStudioPromptDocumentRemoteConfig();
   if (config.mode !== "http") {
     return;
@@ -275,6 +435,7 @@ export async function clearStudioPromptDocumentFromRemote(
   promptId: string,
   transport: StudioPromptDocumentRemoteTransport = remoteTransportOverride ?? defaultRemoteTransport,
 ): Promise<void> {
+  clearStudioPromptDocumentFromLocalCache(promptId);
   const config = getStudioPromptDocumentRemoteConfig();
   if (config.mode !== "http") {
     return;
@@ -347,7 +508,7 @@ export async function moveStudioPromptDocumentToProjectRemote(
     throw new Error("Studio prompt document move returned an invalid summary payload.");
   }
 
-  return {
+  const movedRecord = {
     prompt,
     summary: {
       promptId: summary.promptId,
@@ -358,6 +519,8 @@ export async function moveStudioPromptDocumentToProjectRemote(
       updatedAt: summary.updatedAt,
     },
   };
+  writeStudioPromptDocumentToLocalCache(movedRecord);
+  return movedRecord;
 }
 
 export function setStudioPromptDocumentRemoteTransportForTests(transport?: StudioPromptDocumentRemoteTransport): void {
@@ -366,4 +529,8 @@ export function setStudioPromptDocumentRemoteTransportForTests(transport?: Studi
 
 export function setStudioPromptDocumentRemoteConfigForTests(config?: StudioPromptDocumentRemoteConfig): void {
   remoteConfigOverride = config;
+}
+
+export function setStudioPromptDocumentLocalCacheAdapterForTests(adapter?: StudioPromptDocumentLocalCacheAdapter): void {
+  localCacheAdapterOverride = adapter;
 }

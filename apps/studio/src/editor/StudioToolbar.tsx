@@ -42,8 +42,8 @@ function downloadTextAsFile(filename: string, contents: string): void {
 type StudioToolbarProps = {
   inspectorOpen: boolean;
   consoleState: RuntimeConsoleState;
-  viewMode: "focus" | "structure";
-  onViewModeChange: (mode: "focus" | "structure") => void;
+  layout: "mind_map" | "org_chart" | "list";
+  onLayoutChange: (layout: "mind_map" | "org_chart" | "list") => void;
   onToggleInspector: () => void;
   onCycleConsole: () => void;
 };
@@ -58,8 +58,8 @@ function actionButtonClass(active: boolean, status: "success" | "failure" | "run
 export function StudioToolbar({
   inspectorOpen,
   consoleState,
-  viewMode,
-  onViewModeChange,
+  layout,
+  onLayoutChange,
   onToggleInspector,
   onCycleConsole,
 }: StudioToolbarProps) {
@@ -264,11 +264,14 @@ export function StudioToolbar({
             </Button>
           ) : null}
           <div className="inline-flex items-center rounded-md border border-border bg-muted/30 p-1">
-            <Button variant={viewMode === "focus" ? "secondary" : "ghost"} size="sm" onClick={() => onViewModeChange("focus")}>
-              Focus
+            <Button variant={layout === "mind_map" ? "secondary" : "ghost"} size="sm" onClick={() => onLayoutChange("mind_map")}>
+              Mind Map
             </Button>
-            <Button variant={viewMode === "structure" ? "secondary" : "ghost"} size="sm" onClick={() => onViewModeChange("structure")}>
-              Structure
+            <Button variant={layout === "org_chart" ? "secondary" : "ghost"} size="sm" onClick={() => onLayoutChange("org_chart")}>
+              Org Chart
+            </Button>
+            <Button variant={layout === "list" ? "secondary" : "ghost"} size="sm" onClick={() => onLayoutChange("list")}>
+              List
             </Button>
           </div>
           <Button variant={inspectorOpen ? "secondary" : "outline"} size="sm" onClick={onToggleInspector} disabled={!canonicalPrompt}>

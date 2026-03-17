@@ -823,11 +823,11 @@ test("scoped rendered prompt preview includes inherited and selected block conte
   const next = useStudioStore.getState();
 
   assert.equal(next.selectedScopePromptPreview?.scope.scopeRef, "block:section_1");
-  assert.equal(next.selectedScopePromptPreview?.inheritedMessageCount, 2);
+  assert.equal(next.selectedScopePromptPreview?.inheritedMessageCount, 0);
   assert.equal(next.selectedScopePromptPreview?.selectedMessageCount, 1);
-  assert.match(next.selectedScopePromptPreview?.renderedText ?? "", /Write a structured book\./);
-  assert.match(next.selectedScopePromptPreview?.renderedText ?? "", /Draft the chapter arc\./);
   assert.match(next.selectedScopePromptPreview?.renderedText ?? "", /Detail the first section\./);
+  assert.doesNotMatch(next.selectedScopePromptPreview?.renderedText ?? "", /Write a structured book\./);
+  assert.doesNotMatch(next.selectedScopePromptPreview?.renderedText ?? "", /Draft the chapter arc\./);
 });
 
 test("switching selection updates prompt preview scope and falls back to root", () => {
@@ -1940,6 +1940,55 @@ test("applying graph proposal creates canonical blocks through graph intents", a
 
   assert.equal(store.canonicalPrompt?.spec.blocks.some((block) => block.title === "Proposed Chapter"), true);
   assert.equal(store.graphProposals[proposalId!]?.status, "applied");
+});
+
+test("applying a block-scoped graph proposal keeps focus on the source block and exposes new children in the graph", () => {
+  resetStudioStoreForTests(TREE_FIXTURE_YAML);
+  const initialStore = useStudioStore.getState();
+  const proposal = createGraphProposalFromResponse({
+    prompt: initialStore.canonicalPrompt!,
+    scope: {
+      scopeRef: "block:chapter_1",
+      mode: "block",
+      blockId: "chapter_1",
+      blockPath: ["Chapter 1"],
+      label: "Chapter 1",
+    },
+    sourceNodeId: "block:chapter_1",
+    sourceRuntimeNodeId: "chapter_1",
+    proposalId: "graph_proposal_block_apply_focus_test",
+    executionId: "node_exec_block_apply_focus_test",
+    responseText: JSON.stringify({
+      summary: "Add chapter sections",
+      blocks: [
+        {
+          kind: "section",
+          title: "Applied Section",
+          description: "A new section from the proposal.",
+          instruction: "Draft the applied section.",
+          children: [],
+        },
+      ],
+    }),
+  });
+
+  useStudioStore.setState({
+    selectedNodeId: null,
+    focusedBlockId: null,
+    graphProposals: {
+      [proposal.proposalId]: proposal,
+    },
+    selectedProposalNodeId: `proposal:${proposal.blocks[0]!.proposalNodeId}`,
+  });
+
+  useStudioStore.getState().applyGraphProposal(proposal.proposalId);
+  const store = useStudioStore.getState();
+
+  assert.equal(store.selectedNodeId, "block:chapter_1");
+  assert.equal(store.focusedBlockId, "chapter_1");
+  assert.equal(store.graphProposals[proposal.proposalId]?.status, "applied");
+  assert.ok(store.nodes.some((node) => node.id === "block:chapter_1"));
+  assert.ok(store.nodes.some((node) => node.data.kind === "block" && node.data.title === "Applied Section"));
 });
 
 test("node result history can restore an earlier text result after proposal generation", async () => {

@@ -50,6 +50,10 @@ function PreviewValue({ value }: { value: unknown }) {
   );
 }
 
+function formatBlockKindLabel(value: string): string {
+  return value.replaceAll("_", " ");
+}
+
 function findProposalBlock(blocks: StudioGraphProposalBlock[], proposalNodeId: string): StudioGraphProposalBlock | null {
   for (const block of blocks) {
     if (`proposal:${block.proposalNodeId}` === proposalNodeId) {
@@ -346,50 +350,38 @@ export function InspectorPanel({
     Boolean(selection && draft && selection.kind !== "use_prompt" && activeWorkspaceTab === "prompt");
 
   if (shouldUsePromptWorkspaceLayout && selection && draft && draft.entityKind !== "use_prompt") {
+    const structureSourceRef =
+      selection.kind === "block" ? `block:${selection.block.id}` : `prompt:${canonicalPrompt?.metadata.id}`;
+
     return (
       <div className="flex h-full min-h-0 flex-col">
         <div className="border-b border-border/70 px-4 py-4">
           <div className="space-y-3">
-            <details className="rounded-md border border-border/80 bg-muted/20 p-3">
+            <details open className="rounded-md border border-border/80 bg-muted/20 p-3">
               <summary className="cursor-pointer list-none text-xs font-semibold uppercase tracking-wide text-foreground">
-                Node Meta
-              </summary>
-              <div className="mt-3 space-y-2">
-                {draft.entityKind === "block" ? (
-                  <div className="space-y-1.5">
-                    <Label>Kind</Label>
-                    <select
-                      className="h-9 w-full rounded-md border border-input bg-muted/40 px-3 py-1 text-sm text-foreground"
-                      value={draft.blockKind}
-                      onChange={(event) => updateActiveEditorDraft({ ...draft, blockKind: event.target.value as PromptBlock["kind"] })}
-                    >
-                      <option value="chapter">chapter</option>
-                      <option value="section">section</option>
-                      <option value="module">module</option>
-                      <option value="lesson">lesson</option>
-                      <option value="phase">phase</option>
-                      <option value="step_group">step_group</option>
-                      <option value="generic_block">generic_block</option>
-                    </select>
-                  </div>
-                ) : null}
-
-                <div className="space-y-1.5">
-                  <Label>Title</Label>
-                  <Input value={draft.title} onChange={(event) => updateActiveEditorDraft({ ...draft, title: event.target.value })} />
-                </div>
-              </div>
-            </details>
-
-            <details className="rounded-md border border-border/80 bg-muted/20 p-3">
-              <summary className="cursor-pointer list-none text-xs font-semibold uppercase tracking-wide text-foreground">
-                Suggest Prompt Blocks
+                Node Header
               </summary>
               <div className="mt-3 space-y-3">
+                <div className="grid gap-3 md:grid-cols-[minmax(0,180px)_1fr]">
+                  {draft.entityKind === "block" ? (
+                    <div className="space-y-1.5">
+                      <Label>Kind</Label>
+                      <div className="flex h-9 w-full items-center rounded-md border border-input bg-muted/40 px-3 text-sm text-foreground">
+                        {formatBlockKindLabel(draft.blockKind)}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div className="space-y-1.5">
+                    <Label>Title</Label>
+                    <Input value={draft.title} onChange={(event) => updateActiveEditorDraft({ ...draft, title: event.target.value })} />
+                  </div>
+                </div>
+
                 <div className="flex flex-wrap gap-2">
                   <Button
                     type="button"
-                    variant="outline"
+                    variant="default"
                     onClick={() => {
                       void suggestMessagesForActiveDraft();
                     }}
@@ -410,6 +402,40 @@ export function InspectorPanel({
                     <Button type="button" variant="ghost" onClick={clearMessageSuggestion}>
                       Clear
                     </Button>
+                  ) : null}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={!structureSourceRef || currentRuntimeState?.status === "running"}
+                    onClick={() => generateNodeGraphProposal(structureSourceRef)}
+                  >
+                    {activeNodeProposals.length > 0 ? "Regenerate Child Nodes" : "Suggest Child Nodes"}
+                  </Button>
+                  {activeNodeProposals.length > 0 ? (
+                    <>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          if (currentRuntimeNodeId) {
+                            applyAllNodeGraphProposals(currentRuntimeNodeId);
+                          }
+                        }}
+                      >
+                        Apply Child Nodes
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          if (currentRuntimeNodeId) {
+                            rejectAllNodeGraphProposals(currentRuntimeNodeId);
+                          }
+                        }}
+                      >
+                        Reject Child Nodes
+                      </Button>
+                    </>
                   ) : null}
                 </div>
 
@@ -432,6 +458,11 @@ export function InspectorPanel({
                     Ask the model to reorganize the current prompt draft into stronger internal prompt blocks.
                   </p>
                 )}
+                {activeNodeProposals.length > 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    {activeNodeProposals.length} child-node proposal{activeNodeProposals.length === 1 ? "" : "s"} ready for review in the results workspace.
+                  </p>
+                ) : null}
               </div>
             </details>
 
@@ -595,8 +626,14 @@ export function InspectorPanel({
                   </div>
                 ) : null}
 
+                {activeWorkspaceTab === "config" ? (
+                  <div className="rounded-md border border-border/80 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                    Configuration changes routing, artifact output, and evaluation behavior. Prompt content lives in the <span className="font-medium text-foreground">Prompt</span> tab.
+                  </div>
+                ) : null}
+
                 {selection.kind !== "use_prompt" && activeWorkspaceTab === "config" ? (
-                  <Section title="Models" description="Pick global model profiles for this node. Root selections become the default for descendants.">
+                  <Section title="Model Routing" description="Choose which model profiles execute this node and whether results are merged or compared.">
                     {modelRouting ? (
                       <div className="space-y-3">
                         <div className="rounded-md border border-border bg-muted/30 px-2 py-2 text-xs">
@@ -770,35 +807,9 @@ export function InspectorPanel({
                           </div>
                         </div>
                       ) : null}
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="border-amber-300/70 bg-amber-50/40 text-amber-900 hover:bg-amber-100"
-                          onClick={() => generateNodeGraphProposal(selection.kind === "prompt" ? `prompt:${canonicalPrompt?.metadata.id}` : `block:${selection.block.id}`)}
-                        >
-                          {activeNodeProposals.length > 0 ? "Regenerate Child Nodes" : "Suggest Child Nodes"}
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => applyAllNodeGraphProposals(currentRuntimeNodeId)}
-                          disabled={activeNodeProposals.length === 0}
-                        >
-                          Apply All
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => rejectAllNodeGraphProposals(currentRuntimeNodeId)}
-                          disabled={activeNodeProposals.length === 0}
-                        >
-                          Reject All
-                        </Button>
-                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Use the header above to suggest, apply, or reject child nodes. This panel only reviews the resulting proposals.
+                      </p>
                       {activeNodeProposals.length > 0 ? (
                         <div className="space-y-2">
                           {activeNodeProposals.map((proposal) => (
@@ -831,8 +842,8 @@ export function InspectorPanel({
 
                 {activeWorkspaceTab === "config" && draft.entityKind === "prompt" ? (
                   <>
-                    <Section title="Artifact">
-                      <div className="space-y-2">
+                    <Section title="Artifact Output" description="Control the artifact type and primary build target for this prompt.">
+                      <div className="space-y-3">
                         <div className="space-y-1.5">
                           <Label>Artifact Type</Label>
                           <select
@@ -851,11 +862,6 @@ export function InspectorPanel({
                             <option value={ArtifactType.Course}>Course</option>
                           </select>
                         </div>
-                      </div>
-                    </Section>
-
-                    <Section title="Build">
-                      <div className="space-y-2">
                         <div className="space-y-1.5">
                           <Label>{getBuildTargetHelperLabel(draft.artifactType)}</Label>
                           <select
@@ -880,23 +886,20 @@ export function InspectorPanel({
                   </>
                 ) : activeWorkspaceTab === "config" ? (
                   <>
-                    <Section title="Artifact" description="Inherited from the root prompt.">
+                    <Section title="Artifact Output" description="Block nodes inherit artifact and build settings from the root prompt.">
                       <div className="rounded-md border border-border bg-muted/30 px-2 py-2 text-xs">
                         <div>Artifact Type: {selection.prompt.spec.artifact.type}</div>
                         <div>{selection.prompt.spec.buildTargets[0] ? `Primary Build Target: ${selection.prompt.spec.buildTargets[0]?.id}` : "No build target configured"}</div>
-                      </div>
-                    </Section>
-
-                    <Section title="Build" description="Block-scoped build is not supported in the current safe scope.">
-                      <div className="rounded-md border border-border bg-muted/30 px-2 py-2 text-xs">
-                        Root build remains authoritative. Use block resolve/evaluate/blueprint for subtree work.
+                        <div>Format: {selection.prompt.spec.buildTargets[0]?.format ?? "(none)"}</div>
+                        <div>Output Path: {selection.prompt.spec.buildTargets[0]?.outputPath ?? "(none)"}</div>
+                        <div className="mt-2">Root build remains authoritative. Use prompt execution to test this block in context.</div>
                       </div>
                     </Section>
                   </>
                 ) : null}
 
                 {activeWorkspaceTab === "config" ? (
-                <Section title="Evaluation">
+                <Section title="Evaluation" description="Reviewer roles, rubric criteria, and quality gates for prompt evaluation.">
                   {draft.entityKind === "prompt" ? (
                     <div className="space-y-2">
                       <div className="space-y-1.5">
@@ -944,7 +947,7 @@ export function InspectorPanel({
                           </div>
                         </>
                       ) : (
-                        <p className="text-xs text-muted-foreground">Enable evaluation to configure reviewer roles, rubric criteria, and quality gates.</p>
+                        <p className="text-xs text-muted-foreground">Enable evaluation when this prompt should be reviewed through explicit reviewer roles and rubric gates.</p>
                       )}
                     </div>
                   ) : evaluationSummary ? (
@@ -954,7 +957,7 @@ export function InspectorPanel({
                       <div>Quality Gates: {evaluationSummary.gates}</div>
                     </div>
                   ) : (
-                    <p className="text-xs text-muted-foreground">No evaluation spec configured.</p>
+                    <p className="text-xs text-muted-foreground">No evaluation spec is configured on the root prompt.</p>
                   )}
                 </Section>
                 ) : null}

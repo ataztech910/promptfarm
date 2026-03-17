@@ -137,7 +137,9 @@ export type BlockEditIntent =
   | { type: "block.add"; kind: PromptBlockKind; parentBlockId?: string | null }
   | { type: "block.patch"; blockId: string; changes: Record<string, unknown> }
   | { type: "block.remove"; blockId: string }
-  | { type: "block.move"; blockId: string; direction: "up" | "down" };
+  | { type: "block.move"; blockId: string; direction: "up" | "down" }
+  | { type: "block.relocate"; blockId: string; targetParentId: string | null; targetIndex: number }
+  | { type: "block.reparent"; blockId: string; targetBlockId: string | null };
 
 export type StudioRuntimeAction = "resolve" | "evaluate" | "blueprint" | "build";
 export type StudioRuntimeExecutionStatus = "idle" | "running" | "success" | "failure";

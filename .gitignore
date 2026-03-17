@@ -2,3 +2,10 @@ node_modules
 *dist
 
 docs
+
+*.promptfarm.db*
+.promptfarm/
+**/.promptfarm/
+*.db
+*.db-wal
+*.db-shm

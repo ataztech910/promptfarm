@@ -18,8 +18,8 @@ import {
 import YAML from "yaml";
 import { create } from "zustand";
 import { createStarterPrompt, type StarterArtifactChoice } from "../editor/goldenPath";
-import { canonicalPromptToGraph } from "../graph/adapters/canonicalToGraph";
 import { applyGraphIntentToPrompt } from "../graph/adapters/graphSync";
+import { listCanvasSourceNodeIds, projectPromptToCanvas, type CanvasLayout, type CanvasNodePosition } from "../graph/adapters/projectPromptToCanvas";
 import {
   createEditorDraftSession,
   getDraftHash,
@@ -53,6 +53,7 @@ import {
   createRuntimePreviewFromYaml,
   type StudioRuntimeExecutionScope,
   executeRuntimeActionFromPrompt,
+  warmPromptDependencyBundle,
 } from "../runtime/createRuntimePreview";
 import {
   createGraphProposalNodeOutput,
@@ -61,6 +62,7 @@ import {
   createRenderedPromptPreview,
   resolveSelectedStudioScope,
 } from "../runtime/scopeRuntime";
+import { createAssembledRootPrompt } from "../runtime/effectivePrompt";
 import {
   buildGraphProposalInstruction,
   buildGraphProposalUserPrompt,
@@ -72,7 +74,7 @@ import {
   createMessageSuggestionInputSignature,
   parseMessageSuggestionResponse,
 } from "../runtime/messageSuggestion";
-import { listPromptBlocks } from "../model/promptTree";
+import { filterPromptByHiddenBlocks, listPromptBlocks } from "../model/promptTree";
 import {
   areStudioNodeLlmSettingsEqual,
   clearPersistedStudioNodeLlmSettings,
@@ -404,7 +406,7 @@ function sanitizePersistedStudioPromptRuntimeForPrompt(
   return {
     ...persisted,
     latestScopeOutputs: sanitizeLatestScopeOutputsForPrompt(prompt, persisted.latestScopeOutputs),
-    graphProposals: sanitizeGraphProposalsForGraph(persisted.graphProposals, canonicalPromptToGraph(prompt, null).nodes),
+    graphProposals: sanitizeGraphProposalsForGraph(persisted.graphProposals, listCanvasSourceNodeIds(prompt)),
     nodeResultHistory: sanitizeNodeResultHistoryForPrompt(prompt, persisted.nodeResultHistory),
     nodeRuntimeStates: createNodeRuntimeStates(prompt, nextRuntimeStates),
     nodeExecutionRecords: nextExecutionRecords,
@@ -711,7 +713,11 @@ type StudioState = {
   currentProjectName: string | null;
   paletteFocusKind: StudioNodeKind | null;
   focusedBlockId: string | null;
+  canvasLayout: CanvasLayout;
+  mindMapNodePositions: Record<string, CanvasNodePosition>;
   collapsedBlockIds: string[];
+  hiddenBlockIds: string[];
+  hiddenDependencyPromptIds: string[];
 
   yamlText: string;
   importError: string | null;
@@ -794,12 +800,18 @@ type StudioState = {
   clearWorkspace: () => void;
   setSelectedNodeId: (id: string | null) => void;
   setSelectedProposalNodeId: (id: string | null) => void;
+  clearSyncIssues: () => void;
   updateActiveEditorDraft: (draft: EditorDraft) => void;
   applyActiveEditorDraft: () => void;
   resetActiveEditorDraft: () => void;
   selectFirstNodeByKind: (kind: StudioNodeKind) => void;
   focusBlock: (blockId: string | null) => void;
+  setCanvasLayout: (layout: CanvasLayout) => void;
   toggleBlockCollapsed: (blockId: string) => void;
+  toggleBlockHidden: (blockId: string) => void;
+  toggleDependencyHidden: (promptId: string) => void;
+  attachPromptDependency: (promptId: string) => void;
+  detachPromptDependency: (promptId: string) => void;
   setPaletteFocusKind: (kind: StudioNodeKind | null) => void;
   onNodesChange: (changes: NodeChange<StudioFlowNode>[]) => void;
   onEdgesChange: (changes: EdgeChange<StudioFlowEdge>[]) => void;
@@ -821,6 +833,9 @@ type HydratedGraphState = {
   activeEditorRef: string | null;
   editorDrafts: Record<string, EditorDraftSession>;
   focusedBlockId: string | null;
+  mindMapNodePositions: Record<string, CanvasNodePosition>;
+  hiddenBlockIds: string[];
+  hiddenDependencyPromptIds: string[];
   runtimePreview: StudioRuntimePreview;
   selectedScopePromptPreview: StudioRenderedPromptPreview | null;
   latestScopeOutputs: Record<string, StudioPromptUnitOutput>;
@@ -1024,6 +1039,16 @@ function listPromptRuntimeNodeIds(prompt: Prompt): string[] {
 
 function listPromptScopeRefs(prompt: Prompt): string[] {
   return [`root:${prompt.metadata.id}`, ...listPromptBlockIds(prompt.spec.blocks).map((blockId) => `block:${blockId}`)];
+}
+
+function sanitizeHiddenBlockIdsForPrompt(prompt: Prompt, hiddenBlockIds: string[]): string[] {
+  const availableIds = new Set(listPromptBlockIds(prompt.spec.blocks));
+  return hiddenBlockIds.filter((blockId) => availableIds.has(blockId));
+}
+
+function sanitizeHiddenDependencyPromptIdsForPrompt(prompt: Prompt, hiddenDependencyPromptIds: string[]): string[] {
+  const availableIds = new Set(prompt.spec.use.map((dep) => dep.prompt));
+  return hiddenDependencyPromptIds.filter((promptId) => availableIds.has(promptId));
 }
 
 function sanitizeLatestScopeOutputsForPrompt(
@@ -1706,19 +1731,42 @@ function syncEditorDraftState(input: {
 function syncSelectedScopeRuntimeState(input: {
   canonicalPrompt: Prompt | null;
   selectedNodeId: string | null;
+  hiddenBlockIds: string[];
+  hiddenDependencyPromptIds: string[];
   latestScopeOutputs: Record<string, StudioPromptUnitOutput>;
 }): { selectedScopePromptPreview: StudioRenderedPromptPreview | null; latestScopeOutputs: Record<string, StudioPromptUnitOutput> } {
-  const { canonicalPrompt, selectedNodeId, latestScopeOutputs } = input;
+  const { canonicalPrompt, selectedNodeId, hiddenBlockIds, hiddenDependencyPromptIds, latestScopeOutputs } = input;
   if (!canonicalPrompt) {
     return createEmptyScopeRuntimeState();
   }
 
-  const sourceSnapshotHash = digestPrompt(canonicalPrompt);
-  const scope = resolveSelectedStudioScope(canonicalPrompt, selectedNodeId);
+  const selectedBlockId = selectedNodeId?.startsWith("block:") ? selectedNodeId.replace("block:", "") : null;
+  const promptForPreview = filterPromptByHiddenBlocks(
+    canonicalPrompt,
+    hiddenBlockIds,
+    hiddenDependencyPromptIds,
+    selectedBlockId,
+  );
+  const sourceSnapshotHash = digestPrompt(promptForPreview);
+  const scope = resolveSelectedStudioScope(promptForPreview, selectedNodeId);
   return {
-    selectedScopePromptPreview: createRenderedPromptPreview(canonicalPrompt, scope, sourceSnapshotHash),
+    selectedScopePromptPreview: createRenderedPromptPreview(promptForPreview, scope, sourceSnapshotHash),
     latestScopeOutputs,
   };
+}
+
+function createRuntimePromptSnapshot(
+  prompt: Prompt,
+  hiddenBlockIds: string[],
+  hiddenDependencyPromptIds: string[],
+  preserveBlockId?: string | null,
+): Prompt {
+  return filterPromptByHiddenBlocks(
+    prompt,
+    sanitizeHiddenBlockIdsForPrompt(prompt, hiddenBlockIds),
+    sanitizeHiddenDependencyPromptIdsForPrompt(prompt, hiddenDependencyPromptIds),
+    preserveBlockId,
+  );
 }
 
 function createNodeResultHistoryEntry(input: {
@@ -1768,9 +1816,8 @@ function setActiveNodeResultHistoryEntry(
 
 function sanitizeGraphProposalsForGraph(
   proposals: StudioGraphProposals,
-  nodes: StudioFlowNode[],
+  availableNodeIds: Set<string>,
 ): StudioGraphProposals {
-  const availableNodeIds = new Set(nodes.map((node) => node.id));
   return Object.fromEntries(
     Object.entries(proposals).filter(([, proposal]) => availableNodeIds.has(proposal.sourceNodeId) || proposal.status !== "preview"),
   );
@@ -1813,7 +1860,9 @@ function applyGraphProposalToPrompt(input: {
   proposal: StudioGraphProposal;
 }): { ok: true; prompt: Prompt } | { ok: false; message: string } {
   let nextPrompt = clonePrompt(input.prompt);
-  let currentGraph = canonicalPromptToGraph(nextPrompt, input.focusedBlockId);
+  let currentGraph = projectPromptToCanvas(nextPrompt, {
+    layout: "org_chart",
+  });
 
   function walk(blocks: StudioGraphProposal["blocks"], parentBlockId: string | null): { ok: true } | { ok: false; message: string } {
     for (const block of blocks) {
@@ -1830,7 +1879,9 @@ function applyGraphProposalToPrompt(input: {
         };
       }
       nextPrompt = addResult.prompt;
-      currentGraph = canonicalPromptToGraph(nextPrompt, input.focusedBlockId);
+      currentGraph = projectPromptToCanvas(nextPrompt, {
+        layout: "org_chart",
+      });
 
       const addedBlockId = listPromptBlocks(nextPrompt.spec.blocks)
         .map((entry) => entry.block.id)
@@ -1861,7 +1912,9 @@ function applyGraphProposalToPrompt(input: {
       }
 
       nextPrompt = patchResult.prompt;
-      currentGraph = canonicalPromptToGraph(nextPrompt, input.focusedBlockId);
+      currentGraph = projectPromptToCanvas(nextPrompt, {
+        layout: "org_chart",
+      });
 
       const nested = walk(block.children, addedBlockId);
       if (!nested.ok) {
@@ -2037,6 +2090,11 @@ function applyActiveEditorDraftState(
     result.prompt,
     state.selectedNodeId,
     state.focusedBlockId,
+    state.canvasLayout,
+    state.mindMapNodePositions,
+    state.collapsedBlockIds,
+    state.hiddenBlockIds,
+    state.hiddenDependencyPromptIds,
     omitDraftSession(state.editorDrafts, state.activeEditorRef),
     state.latestScopeOutputs,
     undefined,
@@ -2074,7 +2132,11 @@ function emptyState() {
     currentProjectName: null as string | null,
     paletteFocusKind: null as StudioNodeKind | null,
     focusedBlockId: null as string | null,
+    canvasLayout: "mind_map" as CanvasLayout,
+    mindMapNodePositions: {} as Record<string, CanvasNodePosition>,
     collapsedBlockIds: [] as string[],
+    hiddenBlockIds: [] as string[],
+    hiddenDependencyPromptIds: [] as string[],
     yamlText: "",
     importError: null as string | null,
     syncIssues: [] as string[],
@@ -2115,6 +2177,11 @@ function hydrateFromCanonicalPrompt(
   prompt: Prompt,
   selectedNodeId: string | null,
   focusedBlockId: string | null,
+  canvasLayout: CanvasLayout,
+  mindMapNodePositions: Record<string, CanvasNodePosition>,
+  collapsedBlockIds: string[],
+  hiddenBlockIds: string[],
+  hiddenDependencyPromptIds: string[],
   editorDrafts: Record<string, EditorDraftSession>,
   latestScopeOutputs: Record<string, StudioPromptUnitOutput>,
   runtimePreview?: StudioRuntimePreview,
@@ -2123,8 +2190,19 @@ function hydrateFromCanonicalPrompt(
   nodeResultHistory: StudioNodeResultHistory = {},
   selectedProposalNodeId: string | null = null,
 ): HydratedGraphState {
-  const graph = canonicalPromptToGraph(prompt, focusedBlockId);
-  const sanitizedProposals = sanitizeGraphProposalsForGraph(graphProposals, graph.nodes);
+  const sanitizedHiddenBlockIds = sanitizeHiddenBlockIdsForPrompt(prompt, hiddenBlockIds);
+  const sanitizedHiddenDependencyPromptIds = sanitizeHiddenDependencyPromptIdsForPrompt(prompt, hiddenDependencyPromptIds);
+  const graph = projectPromptToCanvas(prompt, {
+    layout: canvasLayout,
+    collapsedBlockIds,
+    hiddenBlockIds: sanitizedHiddenBlockIds,
+    hiddenDependencyPromptIds: sanitizedHiddenDependencyPromptIds,
+    positionOverrides: canvasLayout === "mind_map" ? mindMapNodePositions : undefined,
+  });
+  const sanitizedProposals = sanitizeGraphProposalsForGraph(
+    graphProposals,
+    new Set(graph.nodes.map((node) => node.id)),
+  );
   const promptSelectionId = `prompt:${prompt.metadata.id}`;
   const nextSelectedNodeId =
     selectedNodeId && (selectedNodeId === promptSelectionId || graph.nodes.some((node) => node.id === selectedNodeId))
@@ -2140,6 +2218,8 @@ function hydrateFromCanonicalPrompt(
   const scopeRuntimeState = syncSelectedScopeRuntimeState({
     canonicalPrompt: prompt,
     selectedNodeId: nextSelectedNodeId,
+    hiddenBlockIds: sanitizedHiddenBlockIds,
+    hiddenDependencyPromptIds: sanitizedHiddenDependencyPromptIds,
     latestScopeOutputs,
   });
 
@@ -2159,6 +2239,9 @@ function hydrateFromCanonicalPrompt(
     activeEditorRef: editorState.activeEditorRef,
     editorDrafts: editorState.editorDrafts,
     focusedBlockId,
+    mindMapNodePositions,
+    hiddenBlockIds: sanitizedHiddenBlockIds,
+    hiddenDependencyPromptIds: sanitizedHiddenDependencyPromptIds,
     runtimePreview: runtimePreview ?? createRuntimePreviewFromPrompt(prompt, "resolve"),
     selectedScopePromptPreview: scopeRuntimeState.selectedScopePromptPreview,
     latestScopeOutputs: scopeRuntimeState.latestScopeOutputs,
@@ -2215,6 +2298,11 @@ function buildPopulatedState(
     prompt,
     selectedNodeId,
     null,
+    "mind_map",
+    {},
+    [],
+    [],
+    [],
     {},
     persistedRuntime?.latestScopeOutputs ?? {},
     runtimePreview,
@@ -2233,6 +2321,7 @@ function buildPopulatedState(
     currentProjectId: projectContext?.projectId ?? null,
     currentProjectName: projectContext?.projectName ?? null,
     paletteFocusKind: null as StudioNodeKind | null,
+    canvasLayout: "mind_map" as CanvasLayout,
     collapsedBlockIds: [] as string[],
     importError: null as string | null,
     syncIssues: [] as string[],
@@ -2303,7 +2392,12 @@ function startNodeExecution(input: {
 
   const executionId = createExecutionId();
   const startedAt = new Date();
-  const promptSnapshot = clonePrompt(prompt);
+  const promptSnapshot = createRuntimePromptSnapshot(
+    clonePrompt(prompt),
+    state.hiddenBlockIds,
+    state.hiddenDependencyPromptIds,
+    target.kind === "block" ? target.blockId : null,
+  );
   const sourceSnapshotHash = digestPrompt(promptSnapshot);
   const targetSnapshot = target.kind === "prompt" ? target : { ...target };
   const upstreamOutputs = listUpstreamNodeOutputs(promptSnapshot, targetSnapshot, state.nodeRuntimeStates);
@@ -2684,6 +2778,7 @@ function startNodeExecution(input: {
           return;
         }
 
+        const llmPromptSource = targetSnapshot.scope.mode === "root" ? createAssembledRootPrompt(promptSnapshot) : promptSnapshot;
         const llmResults: Array<{
           profileId: string;
           profileName: string;
@@ -2711,7 +2806,7 @@ function startNodeExecution(input: {
         for (const profile of effectiveProfiles) {
           const profileExecutionId = `${executionId}__profile__${profile.id}`;
           const scopedPrompt = buildScopedLlmPrompt({
-            prompt: promptSnapshot,
+            prompt: llmPromptSource,
             scope: targetSnapshot.scope,
             upstreamOutputs,
           });
@@ -2805,7 +2900,7 @@ function startNodeExecution(input: {
           }
 
           const mergePrompt = buildScopedLlmPrompt({
-            prompt: promptSnapshot,
+            prompt: llmPromptSource,
             scope: targetSnapshot.scope,
             upstreamOutputs: createMergedCandidateSummary(llmResults),
           });
@@ -3169,10 +3264,15 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       clearPendingNodeExecutions();
       settleInterruptedExecutionRecords(state.savedPrompt.metadata.id);
       const restored = clonePrompt(state.savedPrompt);
-      const hydrated = hydrateFromCanonicalPrompt(
-        restored,
-        state.selectedNodeId,
-        state.focusedBlockId,
+  const hydrated = hydrateFromCanonicalPrompt(
+    restored,
+    state.selectedNodeId,
+    state.focusedBlockId,
+    state.canvasLayout,
+    state.mindMapNodePositions,
+    state.collapsedBlockIds,
+    state.hiddenBlockIds,
+    state.hiddenDependencyPromptIds,
         {},
         {},
         undefined,
@@ -3206,17 +3306,55 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   },
 
   refreshSelectedScopePromptPreview: () =>
-    set((state) => {
-      const scopeRuntimeState = syncSelectedScopeRuntimeState({
-        canonicalPrompt: state.canonicalPrompt,
-        selectedNodeId: state.selectedNodeId,
-        latestScopeOutputs: state.latestScopeOutputs,
-      });
-      return scopeRuntimeState;
-    }),
+    (() => {
+      const state = get();
+      if (!state.canonicalPrompt) {
+        return;
+      }
+      const selectedBlockId = state.selectedNodeId?.startsWith("block:") ? state.selectedNodeId.replace("block:", "") : null;
+      const runtimePrompt = createRuntimePromptSnapshot(
+        state.canonicalPrompt,
+        state.hiddenBlockIds,
+        state.hiddenDependencyPromptIds,
+        selectedBlockId,
+      );
+
+      set(
+        syncSelectedScopeRuntimeState({
+          canonicalPrompt: state.canonicalPrompt,
+          selectedNodeId: state.selectedNodeId,
+          hiddenBlockIds: state.hiddenBlockIds,
+          hiddenDependencyPromptIds: state.hiddenDependencyPromptIds,
+          latestScopeOutputs: state.latestScopeOutputs,
+        }),
+      );
+
+      void (async () => {
+        try {
+          await warmPromptDependencyBundle(runtimePrompt);
+        } catch {
+          // Fall through to runtime preview refresh so missing or failed dependency fetches surface in preview issues.
+        }
+
+        set((current) => {
+          if (!current.canonicalPrompt || current.canonicalPrompt.metadata.id !== state.canonicalPrompt?.metadata.id) {
+            return {};
+          }
+          const scopeRuntimeState = syncSelectedScopeRuntimeState({
+            canonicalPrompt: current.canonicalPrompt,
+            selectedNodeId: current.selectedNodeId,
+            hiddenBlockIds: current.hiddenBlockIds,
+            hiddenDependencyPromptIds: current.hiddenDependencyPromptIds,
+            latestScopeOutputs: current.latestScopeOutputs,
+          });
+          return scopeRuntimeState;
+        });
+      })();
+    })(),
 
   runRuntimeAction: (action) => {
-    const prompt = get().canonicalPrompt;
+    const state = get();
+    const prompt = state.canonicalPrompt;
     if (!prompt) {
       set({
         executionStatus: "failure",
@@ -3231,30 +3369,28 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       return;
     }
 
-    set({
-      executionStatus: "running",
-      runtimeErrorSummary: null,
-      lastRuntimeAction: action,
-      lastRuntimeScope: { mode: "root" },
-    });
-
-    const result = executeRuntimeActionFromPrompt(prompt, action, { mode: "root" });
+    const runtimePrompt = createRuntimePromptSnapshot(
+      prompt,
+      state.hiddenBlockIds,
+      state.hiddenDependencyPromptIds,
+    );
+    const result = executeRuntimeActionFromPrompt(runtimePrompt, action, { mode: "root" });
     const now = Date.now();
-    const latestRootOutput = createPromptUnitOutput(prompt, { mode: "root" }, action, result.preview, digestPrompt(prompt));
+    const latestRootOutput = createPromptUnitOutput(runtimePrompt, { mode: "root" }, action, result.preview, digestPrompt(runtimePrompt));
 
-    set({
+    set((current) => ({
       runtimePreview: result.preview,
       runtimeRefreshedAt: now,
       executionStatus: result.success ? "success" : "failure",
       lastRuntimeAction: action,
-      lastRuntimeScope: { mode: "root" },
+      lastRuntimeScope: { mode: "root" } as StudioRuntimeExecutionScope,
       lastRuntimeAt: now,
       runtimeErrorSummary: result.errorSummary ?? null,
       latestScopeOutputs: {
-        ...get().latestScopeOutputs,
+        ...current.latestScopeOutputs,
         [latestRootOutput.scope.scopeRef]: latestRootOutput,
       },
-    });
+    }));
   },
 
   runFocusedBlockRuntimeAction: (action) => {
@@ -3276,30 +3412,35 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       return;
     }
 
-    set({
-      executionStatus: "running",
-      runtimeErrorSummary: null,
-      lastRuntimeAction: action,
-      lastRuntimeScope: { mode: "block", blockId },
-    });
-
-    const result = executeRuntimeActionFromPrompt(prompt, action, { mode: "block", blockId });
+    const runtimePrompt = createRuntimePromptSnapshot(
+      prompt,
+      state.hiddenBlockIds,
+      state.hiddenDependencyPromptIds,
+      blockId,
+    );
+    const result = executeRuntimeActionFromPrompt(runtimePrompt, action, { mode: "block", blockId });
     const now = Date.now();
-    const latestBlockOutput = createPromptUnitOutput(prompt, { mode: "block", blockId }, action, result.preview, digestPrompt(prompt));
+    const latestBlockOutput = createPromptUnitOutput(
+      runtimePrompt,
+      { mode: "block", blockId },
+      action,
+      result.preview,
+      digestPrompt(runtimePrompt),
+    );
 
-    set({
+    set((current) => ({
       runtimePreview: result.preview,
       runtimeRefreshedAt: now,
       executionStatus: result.success ? "success" : "failure",
       lastRuntimeAction: action,
-      lastRuntimeScope: { mode: "block", blockId },
+      lastRuntimeScope: { mode: "block", blockId } as StudioRuntimeExecutionScope,
       lastRuntimeAt: now,
       runtimeErrorSummary: result.errorSummary ?? null,
       latestScopeOutputs: {
-        ...get().latestScopeOutputs,
+        ...current.latestScopeOutputs,
         [latestBlockOutput.scope.scopeRef]: latestBlockOutput,
       },
-    });
+    }));
   },
 
   runSelectedScopeRuntimeAction: (action) => {
@@ -3319,19 +3460,19 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       return;
     }
 
-    const scope = resolveSelectedStudioScope(prompt, state.selectedNodeId);
-    set({
-      executionStatus: "running",
-      runtimeErrorSummary: null,
-      lastRuntimeAction: action,
-      lastRuntimeScope: scope,
-    });
-
-    const result = executeRuntimeActionFromPrompt(prompt, action, scope);
+    const selectedBlockId = state.selectedNodeId?.startsWith("block:") ? state.selectedNodeId.replace("block:", "") : null;
+    const runtimePrompt = createRuntimePromptSnapshot(
+      prompt,
+      state.hiddenBlockIds,
+      state.hiddenDependencyPromptIds,
+      selectedBlockId,
+    );
+    const scope = resolveSelectedStudioScope(runtimePrompt, state.selectedNodeId);
+    const result = executeRuntimeActionFromPrompt(runtimePrompt, action, scope);
     const now = Date.now();
-    const latestOutput = createPromptUnitOutput(prompt, scope, action, result.preview, digestPrompt(prompt));
+    const latestOutput = createPromptUnitOutput(runtimePrompt, scope, action, result.preview, digestPrompt(runtimePrompt));
 
-    set({
+    set((current) => ({
       runtimePreview: result.preview,
       runtimeRefreshedAt: now,
       executionStatus: result.success ? "success" : "failure",
@@ -3340,10 +3481,10 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       lastRuntimeAt: now,
       runtimeErrorSummary: result.errorSummary ?? null,
       latestScopeOutputs: {
-        ...get().latestScopeOutputs,
+        ...current.latestScopeOutputs,
         [latestOutput.scope.scopeRef]: latestOutput,
       },
-    });
+    }));
   },
 
   applyNodeLlmPreset: (presetId) =>
@@ -3568,10 +3709,18 @@ export const useStudioStore = create<StudioState>((set, get) => ({
           status: "applied",
         },
       };
+      const nextSelectedNodeId = proposal.sourceNodeId;
+      const nextFocusedBlockId =
+        proposal.scope.mode === "block" ? proposal.scope.blockId ?? state.focusedBlockId : state.focusedBlockId;
       const hydrated = hydrateFromCanonicalPrompt(
         applied.prompt,
-        state.selectedNodeId ?? proposal.sourceNodeId,
-        state.focusedBlockId,
+        nextSelectedNodeId,
+        nextFocusedBlockId,
+        state.canvasLayout,
+        state.mindMapNodePositions,
+        state.collapsedBlockIds,
+        state.hiddenBlockIds,
+        state.hiddenDependencyPromptIds,
         state.editorDrafts,
         state.latestScopeOutputs,
         undefined,
@@ -4169,6 +4318,11 @@ export const useStudioStore = create<StudioState>((set, get) => ({
             current.canonicalPrompt,
             current.selectedNodeId,
             current.focusedBlockId,
+            current.canvasLayout,
+            current.mindMapNodePositions,
+            current.collapsedBlockIds,
+            current.hiddenBlockIds,
+            current.hiddenDependencyPromptIds,
             current.editorDrafts,
             sanitized.latestScopeOutputs,
             current.runtimePreview,
@@ -4232,6 +4386,8 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       const scopeRuntimeState = syncSelectedScopeRuntimeState({
         canonicalPrompt: state.canonicalPrompt,
         selectedNodeId: id,
+        hiddenBlockIds: state.hiddenBlockIds,
+        hiddenDependencyPromptIds: state.hiddenDependencyPromptIds,
         latestScopeOutputs: state.latestScopeOutputs,
       });
       return {
@@ -4248,6 +4404,11 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       selectedNodeId: id ? null : state.selectedNodeId,
       activeEditorRef: id ? null : state.activeEditorRef,
     })),
+
+  clearSyncIssues: () =>
+    set({
+      syncIssues: [],
+    }),
 
   updateActiveEditorDraft: (draft) =>
     set((state) => {
@@ -4311,6 +4472,8 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         const scopeRuntimeState = syncSelectedScopeRuntimeState({
           canonicalPrompt: state.canonicalPrompt,
           selectedNodeId,
+          hiddenBlockIds: state.hiddenBlockIds,
+          hiddenDependencyPromptIds: state.hiddenDependencyPromptIds,
           latestScopeOutputs: state.latestScopeOutputs,
         });
         return {
@@ -4333,6 +4496,8 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       const scopeRuntimeState = syncSelectedScopeRuntimeState({
         canonicalPrompt: state.canonicalPrompt,
         selectedNodeId,
+        hiddenBlockIds: state.hiddenBlockIds,
+        hiddenDependencyPromptIds: state.hiddenDependencyPromptIds,
         latestScopeOutputs: state.latestScopeOutputs,
       });
       return {
@@ -4346,7 +4511,13 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   focusBlock: (blockId) =>
     set((state) => {
       if (!state.canonicalPrompt) return {};
-      const graph = canonicalPromptToGraph(state.canonicalPrompt, blockId);
+      const graph = projectPromptToCanvas(state.canonicalPrompt, {
+        layout: state.canvasLayout,
+        collapsedBlockIds: state.collapsedBlockIds,
+        hiddenBlockIds: state.hiddenBlockIds,
+        hiddenDependencyPromptIds: state.hiddenDependencyPromptIds,
+        positionOverrides: state.canvasLayout === "mind_map" ? state.mindMapNodePositions : undefined,
+      });
       const preferredNodeId = blockId ? `block:${blockId}` : null;
       const selectedNodeId =
         preferredNodeId && graph.nodes.some((node) => node.id === preferredNodeId)
@@ -4362,6 +4533,8 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       const scopeRuntimeState = syncSelectedScopeRuntimeState({
         canonicalPrompt: state.canonicalPrompt,
         selectedNodeId,
+        hiddenBlockIds: state.hiddenBlockIds,
+        hiddenDependencyPromptIds: state.hiddenDependencyPromptIds,
         latestScopeOutputs: state.latestScopeOutputs,
       });
       return {
@@ -4375,12 +4548,226 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       };
     }),
 
+  setCanvasLayout: (layout) =>
+    set((state) => {
+      if (!state.canonicalPrompt || state.canvasLayout === layout) {
+        return {};
+      }
+      const hydrated = hydrateFromCanonicalPrompt(
+        state.canonicalPrompt,
+        state.selectedNodeId,
+        state.focusedBlockId,
+        layout,
+        state.mindMapNodePositions,
+        state.collapsedBlockIds,
+        state.hiddenBlockIds,
+        state.hiddenDependencyPromptIds,
+        state.editorDrafts,
+        state.latestScopeOutputs,
+        state.runtimePreview,
+        state.nodeRuntimeStates,
+        state.graphProposals,
+        state.nodeResultHistory,
+        state.selectedProposalNodeId,
+      );
+      return {
+        ...hydrated,
+        canvasLayout: layout,
+      };
+    }),
+
   toggleBlockCollapsed: (blockId) =>
-    set((state) => ({
-      collapsedBlockIds: state.collapsedBlockIds.includes(blockId)
+    set((state) => {
+      const collapsedBlockIds = state.collapsedBlockIds.includes(blockId)
         ? state.collapsedBlockIds.filter((id) => id !== blockId)
-        : [...state.collapsedBlockIds, blockId],
-    })),
+        : [...state.collapsedBlockIds, blockId];
+      if (!state.canonicalPrompt) {
+        return {
+          collapsedBlockIds,
+        };
+      }
+      const hydrated = hydrateFromCanonicalPrompt(
+        state.canonicalPrompt,
+        state.selectedNodeId,
+        state.focusedBlockId,
+        state.canvasLayout,
+        state.mindMapNodePositions,
+        collapsedBlockIds,
+        state.hiddenBlockIds,
+        state.hiddenDependencyPromptIds,
+        state.editorDrafts,
+        state.latestScopeOutputs,
+        state.runtimePreview,
+        state.nodeRuntimeStates,
+        state.graphProposals,
+        state.nodeResultHistory,
+        state.selectedProposalNodeId,
+      );
+      return {
+        ...hydrated,
+        canvasLayout: state.canvasLayout,
+        collapsedBlockIds,
+      };
+    }),
+
+  toggleBlockHidden: (blockId) =>
+    set((state) => {
+      const hiddenBlockIds = state.hiddenBlockIds.includes(blockId)
+        ? state.hiddenBlockIds.filter((id) => id !== blockId)
+        : [...state.hiddenBlockIds, blockId];
+      const hydrated = hydrateFromCanonicalPrompt(
+        state.canonicalPrompt,
+        state.selectedNodeId,
+        state.focusedBlockId,
+        state.canvasLayout,
+        state.mindMapNodePositions,
+        state.collapsedBlockIds,
+        hiddenBlockIds,
+        state.hiddenDependencyPromptIds,
+        state.editorDrafts,
+        state.latestScopeOutputs,
+        state.runtimePreview,
+        state.nodeRuntimeStates,
+        state.graphProposals,
+        state.nodeResultHistory,
+        state.selectedProposalNodeId,
+      );
+
+      return {
+        ...hydrated,
+        canvasLayout: state.canvasLayout,
+        collapsedBlockIds: state.collapsedBlockIds,
+      };
+    }),
+
+  toggleDependencyHidden: (promptId) =>
+    set((state) => {
+      const hiddenDependencyPromptIds = state.hiddenDependencyPromptIds.includes(promptId)
+        ? state.hiddenDependencyPromptIds.filter((id) => id !== promptId)
+        : [...state.hiddenDependencyPromptIds, promptId];
+      const hydrated = hydrateFromCanonicalPrompt(
+        state.canonicalPrompt,
+        state.selectedNodeId,
+        state.focusedBlockId,
+        state.canvasLayout,
+        state.mindMapNodePositions,
+        state.collapsedBlockIds,
+        state.hiddenBlockIds,
+        hiddenDependencyPromptIds,
+        state.editorDrafts,
+        state.latestScopeOutputs,
+        state.runtimePreview,
+        state.nodeRuntimeStates,
+        state.graphProposals,
+        state.nodeResultHistory,
+        state.selectedProposalNodeId,
+      );
+
+      return {
+        ...hydrated,
+        canvasLayout: state.canvasLayout,
+        collapsedBlockIds: state.collapsedBlockIds,
+      };
+    }),
+
+  attachPromptDependency: (promptId) =>
+    set((state) => {
+      if (!state.canonicalPrompt || !promptId.trim() || state.canonicalPrompt.spec.use.some((dep) => dep.prompt === promptId)) {
+        return {};
+      }
+
+      clearPendingNodeExecutions();
+      settleInterruptedExecutionRecords(state.canonicalPrompt.metadata.id);
+
+      const nextPrompt = clonePrompt(state.canonicalPrompt);
+      nextPrompt.spec.use.push({
+        prompt: promptId,
+        mode: "inline",
+      });
+
+      const hydrated = hydrateFromCanonicalPrompt(
+        nextPrompt,
+        state.selectedNodeId,
+        state.focusedBlockId,
+        state.canvasLayout,
+        state.mindMapNodePositions,
+        state.collapsedBlockIds,
+        state.hiddenBlockIds,
+        state.hiddenDependencyPromptIds,
+        state.editorDrafts,
+        state.latestScopeOutputs,
+        undefined,
+        state.nodeRuntimeStates,
+        state.graphProposals,
+        state.nodeResultHistory,
+        state.selectedProposalNodeId,
+      );
+      const isDirty = state.savedPromptDigest ? digestPrompt(nextPrompt) !== state.savedPromptDigest : true;
+
+      void warmPromptDependencyBundle(nextPrompt)
+        .then(() => {
+          get().refreshSelectedScopePromptPreview();
+        })
+        .catch(() => {
+          get().refreshSelectedScopePromptPreview();
+        });
+
+      return {
+        ...hydrated,
+        nodeRuntimeStates: invalidateNodeRuntimeStates(hydrated.nodeRuntimeStates),
+        nodeExecutionRecords: hydrated.nodeExecutionRecords,
+        importError: null,
+        syncIssues: [],
+        isDirty,
+        hasYamlDraftChanges: false,
+        executionStatus: "idle" as StudioRuntimeExecutionStatus,
+        runtimeErrorSummary: null,
+      };
+    }),
+
+  detachPromptDependency: (promptId) =>
+    set((state) => {
+      if (!state.canonicalPrompt || !state.canonicalPrompt.spec.use.some((dep) => dep.prompt === promptId)) {
+        return {};
+      }
+
+      clearPendingNodeExecutions();
+      settleInterruptedExecutionRecords(state.canonicalPrompt.metadata.id);
+
+      const nextPrompt = clonePrompt(state.canonicalPrompt);
+      nextPrompt.spec.use = nextPrompt.spec.use.filter((dep) => dep.prompt !== promptId);
+
+      const hydrated = hydrateFromCanonicalPrompt(
+        nextPrompt,
+        state.selectedNodeId,
+        state.focusedBlockId,
+        state.canvasLayout,
+        state.mindMapNodePositions,
+        state.collapsedBlockIds,
+        state.hiddenBlockIds,
+        state.hiddenDependencyPromptIds.filter((id) => id !== promptId),
+        state.editorDrafts,
+        state.latestScopeOutputs,
+        undefined,
+        state.nodeRuntimeStates,
+        state.graphProposals,
+        state.nodeResultHistory,
+        state.selectedProposalNodeId,
+      );
+      const isDirty = state.savedPromptDigest ? digestPrompt(nextPrompt) !== state.savedPromptDigest : true;
+
+      return {
+        ...hydrated,
+        nodeRuntimeStates: invalidateNodeRuntimeStates(hydrated.nodeRuntimeStates),
+        nodeExecutionRecords: hydrated.nodeExecutionRecords,
+        importError: null,
+        syncIssues: [],
+        isDirty,
+        hasYamlDraftChanges: false,
+        executionStatus: "idle" as StudioRuntimeExecutionStatus,
+        runtimeErrorSummary: null,
+      };
+    }),
 
   setPaletteFocusKind: (kind) => set({ paletteFocusKind: kind }),
 
@@ -4389,8 +4776,36 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       const visualOnlyChanges = changes.filter(
         (change) => change.type === "position" || change.type === "dimensions" || change.type === "select",
       );
+      const nextNodes = applyNodeChanges(visualOnlyChanges, state.nodes);
+      if (state.canvasLayout !== "mind_map") {
+        return {
+          nodes: nextNodes,
+        };
+      }
+
+      const movedNodeIds = new Set(
+        changes.filter((change) => change.type === "position" && "position" in change && Boolean(change.position)).map((change) => change.id),
+      );
+      if (movedNodeIds.size === 0) {
+        return {
+          nodes: nextNodes,
+        };
+      }
+
+      const nextMindMapNodePositions = { ...state.mindMapNodePositions };
+      nextNodes.forEach((node) => {
+        if (!movedNodeIds.has(node.id) || node.data.graphState === "proposal") {
+          return;
+        }
+        nextMindMapNodePositions[node.id] = {
+          x: node.position.x,
+          y: node.position.y,
+        };
+      });
+
       return {
-        nodes: applyNodeChanges(visualOnlyChanges, state.nodes),
+        nodes: nextNodes,
+        mindMapNodePositions: nextMindMapNodePositions,
       };
     }),
 
@@ -4433,6 +4848,11 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         result.prompt,
         state.selectedNodeId,
         nextFocusedBlockId,
+        state.canvasLayout,
+        state.mindMapNodePositions,
+        state.collapsedBlockIds,
+        state.hiddenBlockIds,
+        state.hiddenDependencyPromptIds,
         state.editorDrafts,
         state.latestScopeOutputs,
         undefined,

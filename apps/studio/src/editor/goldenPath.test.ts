@@ -7,8 +7,10 @@ test("createStarterPrompt generates canonical starter pipeline", () => {
   const prompt = createStarterPrompt(ArtifactType.Instruction);
 
   assert.equal(prompt.spec.artifact.type, ArtifactType.Instruction);
-  assert.equal(prompt.spec.messages.length, 1);
+  assert.equal(prompt.spec.messages.length, 2);
   assert.equal(prompt.spec.messages[0]?.role, "system");
+  assert.equal(prompt.spec.messages[1]?.role, "user");
+  assert.equal(prompt.metadata.description, prompt.spec.messages[1]?.content);
   assert.equal(prompt.spec.buildTargets.length, 1);
   assert.equal(prompt.spec.inputs.length, 0);
 });

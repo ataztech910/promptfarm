@@ -9,7 +9,11 @@ import {
 } from "@promptfarm/core";
 import YAML from "yaml";
 import type { StudioRuntimeAction, StudioRuntimePreview } from "../graph/types";
-import { createScopedPromptFromBlock } from "./scopedPrompt";
+import {
+  readStudioPromptDocumentFromLocalCacheSnapshot,
+  readStudioPromptDocumentFromRemote,
+} from "./studioPromptDocumentRemote";
+import { createAssembledRootPrompt, resolveEffectivePromptForStudioScope } from "./effectivePrompt";
 
 type RuntimeInputFile = {
   filepath: string;
@@ -34,8 +38,46 @@ export type StudioRuntimeExecutionScope =
       blockId: string;
     };
 
+function collectRuntimePromptFiles(prompt: Prompt): { files: RuntimeInputFile[]; issues: RuntimeIssue[] } {
+  const files: RuntimeInputFile[] = [];
+  const issues: RuntimeIssue[] = [];
+  const visitedPromptIds = new Set<string>();
+
+  function visit(currentPrompt: Prompt, filepath: string, options: { assembleTree: boolean }): void {
+    if (visitedPromptIds.has(currentPrompt.metadata.id)) {
+      return;
+    }
+
+    visitedPromptIds.add(currentPrompt.metadata.id);
+    files.push({ filepath, raw: options.assembleTree ? createAssembledRootPrompt(currentPrompt) : currentPrompt });
+
+    for (const dep of currentPrompt.spec.use) {
+      const dependencyRecord = readStudioPromptDocumentFromLocalCacheSnapshot(dep.prompt);
+      if (!dependencyRecord) {
+        issues.push({
+          filepath,
+          message: `Prompt "${currentPrompt.metadata.id}" references missing dependency "${dep.prompt}" in spec.use.`,
+        });
+        continue;
+      }
+
+      visit(dependencyRecord.prompt, `studio://dependency/${dependencyRecord.prompt.metadata.id}.prompt.yaml`, { assembleTree: true });
+    }
+  }
+
+  visit(prompt, "studio://current.prompt.yaml", { assembleTree: false });
+  return { files, issues };
+}
+
 function resolveBaseContext(prompt: Prompt): StudioRuntimePreview {
-  const files = [{ filepath: "studio://current.prompt.yaml", raw: prompt }] as RuntimeInputFile[];
+  const bundle = collectRuntimePromptFiles(prompt);
+  if (bundle.issues.length > 0) {
+    return {
+      issues: bundle.issues,
+    };
+  }
+
+  const files = bundle.files as RuntimeInputFile[];
   const runtime = resolveAllRuntimeFromFiles(files as never, "/studio");
 
   if (runtime.issues.length > 0 || runtime.contexts.length === 0) {
@@ -48,6 +90,29 @@ function resolveBaseContext(prompt: Prompt): StudioRuntimePreview {
     context: runtime.contexts[0]!,
     issues: [],
   };
+}
+
+export async function warmPromptDependencyBundle(prompt: Prompt): Promise<void> {
+  const visitedPromptIds = new Set<string>();
+
+  async function visit(currentPrompt: Prompt): Promise<void> {
+    if (visitedPromptIds.has(currentPrompt.metadata.id)) {
+      return;
+    }
+
+    visitedPromptIds.add(currentPrompt.metadata.id);
+
+    for (const dep of currentPrompt.spec.use) {
+      const dependencyRecord =
+        readStudioPromptDocumentFromLocalCacheSnapshot(dep.prompt) ?? (await readStudioPromptDocumentFromRemote(dep.prompt));
+      if (!dependencyRecord) {
+        continue;
+      }
+      await visit(dependencyRecord.prompt);
+    }
+  }
+
+  await visit(prompt);
 }
 
 export function executeRuntimeActionFromPrompt(
@@ -70,16 +135,7 @@ export function executeRuntimeActionFromPrompt(
     };
   }
 
-  const promptForRuntime =
-    scope.mode === "block"
-      ? (() => {
-          const scoped = createScopedPromptFromBlock(prompt, scope.blockId);
-          if (!scoped.ok) {
-            return scoped;
-          }
-          return scoped;
-        })()
-      : { ok: true as const, prompt, blockPath: [] as string[] };
+  const promptForRuntime = resolveEffectivePromptForStudioScope(prompt, scope);
 
   if (!promptForRuntime.ok) {
     return {

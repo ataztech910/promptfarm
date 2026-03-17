@@ -1,10 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Boxes, Braces, FolderTree, LayoutGrid, LogOut, ShieldCheck, Sparkles, TerminalSquare, UserRound, WandSparkles, X } from "lucide-react";
+import { Boxes, FolderTree, LogOut, ShieldCheck, TerminalSquare, UserRound, X } from "lucide-react";
 import { Panel } from "../components/layout/Panel";
 import { PromptGraphCanvas } from "../graph/PromptGraphCanvas";
-import { canonicalPromptToStructureGraph } from "../graph/adapters/canonicalToStructureGraph";
 import { InspectorPanel } from "../inspector/InspectorPanel";
-import { NodePalette } from "../nodes/NodePalette";
 import { ModelRegistryPanel } from "../runtime/ModelRegistryPanel";
 import { RuntimePreviewPanel, type RuntimeConsoleState } from "../runtime/RuntimePreviewPanel";
 import { useStudioStore } from "../state/studioStore";
@@ -14,17 +12,13 @@ import { Tabs, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { cn } from "../lib/cn";
 import type { PromptBlockKind } from "@promptfarm/core";
 import type { StudioFlowNode } from "../graph/types";
-import { FlowGuidePanel } from "./FlowGuidePanel";
 import { PromptTreePanel } from "./PromptTreePanel";
 import { StarterPromptDialog } from "./StarterPromptDialog";
 import { StudioToolbar } from "./StudioToolbar";
-import { YamlImportPanel } from "./YamlImportPanel";
 import { useStudioAuth } from "../auth/StudioAuthProvider";
-import { NodeWorkspaceActionBar } from "./NodeWorkspaceActionBar";
 import { NodeWorkspaceResultsPanel } from "./NodeWorkspaceResultsPanel";
 
-type LeftPanelMode = "tree" | "advanced" | "models" | "account";
-type AdvancedToolTab = "flow" | "palette" | "yaml";
+type LeftPanelMode = "tree" | "models" | "account";
 type WorkspaceAuthorTab = "prompt" | "config";
 
 type CanvasMenuState =
@@ -34,48 +28,6 @@ type CanvasMenuState =
 
 function formatBlockKind(value: string): string {
   return value.replaceAll("_", " ");
-}
-
-function AdvancedToolsPanel({
-  activeTab,
-  onSelectTab,
-  onSelectRootPrompt,
-}: {
-  activeTab: AdvancedToolTab;
-  onSelectTab: (tab: AdvancedToolTab) => void;
-  onSelectRootPrompt: () => void;
-}) {
-  return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="border-b border-border px-3 py-2">
-        <h2 className="text-sm font-semibold">Advanced Tools</h2>
-        <p className="mt-1 text-xs text-muted-foreground">Secondary authoring tools. Hidden by default to keep structure-first navigation focused.</p>
-      </div>
-
-      <div className="border-b border-border px-2 py-2">
-        <div className="flex flex-wrap gap-2">
-          <Button variant={activeTab === "flow" ? "secondary" : "outline"} size="sm" onClick={() => onSelectTab("flow")}>
-            <Sparkles className="h-3.5 w-3.5" />
-            Flow
-          </Button>
-          <Button variant={activeTab === "palette" ? "secondary" : "outline"} size="sm" onClick={() => onSelectTab("palette")}>
-            <LayoutGrid className="h-3.5 w-3.5" />
-            Palette
-          </Button>
-          <Button variant={activeTab === "yaml" ? "secondary" : "outline"} size="sm" onClick={() => onSelectTab("yaml")}>
-            <Braces className="h-3.5 w-3.5" />
-            YAML
-          </Button>
-        </div>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-hidden">
-        {activeTab === "flow" ? <FlowGuidePanel onSelectRootPrompt={onSelectRootPrompt} /> : null}
-        {activeTab === "palette" ? <NodePalette /> : null}
-        {activeTab === "yaml" ? <YamlImportPanel /> : null}
-      </div>
-    </div>
-  );
 }
 
 function LocalAccountPanel({
@@ -115,19 +67,22 @@ function LocalAccountPanel({
 
 export function StudioShell() {
   const canonicalPrompt = useStudioStore((s) => s.canonicalPrompt);
+  const nodes = useStudioStore((s) => s.nodes);
   const selectedNodeId = useStudioStore((s) => s.selectedNodeId);
   const focusedBlockId = useStudioStore((s) => s.focusedBlockId);
+  const canvasLayout = useStudioStore((s) => s.canvasLayout);
   const syncIssues = useStudioStore((s) => s.syncIssues);
   const runtimeIssues = useStudioStore((s) => s.runtimePreview.issues.length);
   const consoleEvents = useStudioStore((s) => s.consoleEvents);
+  const hiddenDependencyPromptIds = useStudioStore((s) => s.hiddenDependencyPromptIds);
   const applyGraphIntent = useStudioStore((s) => s.applyGraphIntent);
   const focusBlock = useStudioStore((s) => s.focusBlock);
+  const setCanvasLayout = useStudioStore((s) => s.setCanvasLayout);
   const setSelectedNodeId = useStudioStore((s) => s.setSelectedNodeId);
+  const refreshSelectedScopePromptPreview = useStudioStore((s) => s.refreshSelectedScopePromptPreview);
   const recoverRemoteRuntimeForCurrentPrompt = useStudioStore((s) => s.recoverRemoteRuntimeForCurrentPrompt);
   const { logOut, user } = useStudioAuth();
   const [leftPanelMode, setLeftPanelMode] = useState<LeftPanelMode>("tree");
-  const [advancedToolTab, setAdvancedToolTab] = useState<AdvancedToolTab>("flow");
-  const [viewMode, setViewMode] = useState<"focus" | "structure">("focus");
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [consoleState, setConsoleState] = useState<RuntimeConsoleState>("hidden");
   const [canvasMenu, setCanvasMenu] = useState<CanvasMenuState>(null);
@@ -156,6 +111,22 @@ export function StudioShell() {
   useEffect(() => {
     setWorkspaceAuthorTab("prompt");
   }, [selectedNodeId, focusedBlockId, canonicalPrompt?.metadata.id]);
+
+  const dependencySignature = useMemo(
+    () => canonicalPrompt?.spec.use.map((dep) => dep.prompt).join("|") ?? "",
+    [canonicalPrompt],
+  );
+  const hiddenDependencySignature = useMemo(
+    () => hiddenDependencyPromptIds.join("|"),
+    [hiddenDependencyPromptIds],
+  );
+
+  useEffect(() => {
+    if (!canonicalPrompt) {
+      return;
+    }
+    refreshSelectedScopePromptPreview();
+  }, [canonicalPrompt?.metadata.id, dependencySignature, hiddenDependencySignature, refreshSelectedScopePromptPreview]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -218,9 +189,9 @@ export function StudioShell() {
     () => (canonicalPrompt ? getSuggestedBlockKinds(canonicalPrompt, focusedBlockId) : []),
     [canonicalPrompt, focusedBlockId],
   );
-  const structureGraph = useMemo(
-    () => (canonicalPrompt ? canonicalPromptToStructureGraph(canonicalPrompt) : null),
-    [canonicalPrompt],
+  const selectedWorkspaceNode = useMemo(
+    () => (selectedNodeId ? nodes.find((node) => node.id === selectedNodeId) ?? null : null),
+    [nodes, selectedNodeId],
   );
 
   const blockMenuKinds = useMemo(() => {
@@ -243,15 +214,8 @@ export function StudioShell() {
     setCommandPaletteOpen(false);
   }
 
-  function handleViewModeChange(mode: "focus" | "structure") {
-    if (mode === "focus") {
-      if (selectedNodeId?.startsWith("block:")) {
-        focusBlock(selectedNodeId.replace("block:", ""));
-      } else if (selectedNodeId?.startsWith("prompt:") || selectedNodeId?.startsWith("use_prompt:")) {
-        focusBlock(null);
-      }
-    }
-    setViewMode(mode);
+  function handleLayoutChange(layout: "mind_map" | "org_chart" | "list") {
+    setCanvasLayout(layout);
   }
 
   function closeInspector() {
@@ -343,16 +307,6 @@ export function StudioShell() {
       return <ModelRegistryPanel />;
     }
 
-    if (leftPanelMode === "advanced") {
-      return (
-        <AdvancedToolsPanel
-          activeTab={advancedToolTab}
-          onSelectTab={setAdvancedToolTab}
-          onSelectRootPrompt={openRootInspector}
-        />
-      );
-    }
-
     if (leftPanelMode === "account") {
       if (!user) {
         return (
@@ -372,8 +326,8 @@ export function StudioShell() {
       <StudioToolbar
         inspectorOpen={inspectorOpen}
         consoleState={consoleState}
-        viewMode={viewMode}
-        onViewModeChange={handleViewModeChange}
+        layout={canvasLayout}
+        onLayoutChange={handleLayoutChange}
         onToggleInspector={handleInspectorToggle}
         onCycleConsole={() =>
           setConsoleState((current) => {
@@ -412,15 +366,6 @@ export function StudioShell() {
                   <Boxes className="h-4 w-4" />
                 </Button>
                 <Button
-                  variant={leftPanelMode === "advanced" ? "secondary" : "ghost"}
-                  size="icon"
-                  className="h-10 w-10"
-                  onClick={() => setLeftPanelMode((current) => (current === "advanced" ? "tree" : "advanced"))}
-                  title="Advanced Tools"
-                >
-                  <WandSparkles className="h-4 w-4" />
-                </Button>
-                <Button
                   variant={leftPanelMode === "account" ? "secondary" : "ghost"}
                   size="icon"
                   className="h-10 w-10"
@@ -431,10 +376,6 @@ export function StudioShell() {
                 </Button>
 
                 <div className="mt-auto flex flex-col gap-2 text-center">
-                  <div className="rounded-md border border-border/80 bg-background/70 px-2 py-1 text-[10px] text-muted-foreground">
-                    Runtime
-                    <div className="font-semibold text-foreground">{runtimeIssues}</div>
-                  </div>
                   {syncIssues.length > 0 ? (
                     <div className="rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1 text-[10px] text-destructive">
                       Sync
@@ -453,8 +394,7 @@ export function StudioShell() {
               <div className="relative min-h-0 flex-1 overflow-hidden p-3">
                 <Panel className="h-full overflow-hidden">
                   <PromptGraphCanvas
-                    viewMode={viewMode}
-                    graphOverride={viewMode === "structure" ? structureGraph : null}
+                    layout={canvasLayout}
                     onNodeActivate={handleNodeActivate}
                     onPaneActivate={handlePaneActivate}
                     onPaneContextMenu={(position) => {
@@ -489,14 +429,16 @@ export function StudioShell() {
                   <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
                     <div>
                       <h2 className="text-sm font-semibold">Node Workspace</h2>
-                      <p className="text-xs text-muted-foreground">Author on the left. Review composed prompt and rendered results on the right.</p>
+                      <p className="text-xs text-muted-foreground">
+                        {selectedWorkspaceNode?.data.title
+                          ? `${selectedWorkspaceNode.data.title}. Author on the left. Review composed prompt and rendered results on the right.`
+                          : "Author on the left. Review composed prompt and rendered results on the right."}
+                      </p>
                     </div>
                     <Button variant="ghost" size="icon" className="h-8 w-8" onClick={closeInspector}>
                       <X className="h-4 w-4" />
                     </Button>
                   </div>
-
-                  <NodeWorkspaceActionBar />
 
                   <div className="flex min-h-0 flex-1 overflow-hidden">
                     <div className="flex min-w-0 flex-1 flex-col border-r border-border">
@@ -632,16 +574,6 @@ export function StudioShell() {
                   Add Use Prompt dependency
                 </button>
               ) : null}
-              <button
-                type="button"
-                className="rounded-md px-3 py-2 text-left text-sm hover:bg-muted"
-                onClick={() => {
-                  setLeftPanelMode("advanced");
-                  setCommandPaletteOpen(false);
-                }}
-              >
-                Open Advanced Tools
-              </button>
             </div>
           </div>
         </>

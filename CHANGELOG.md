@@ -45,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - That adapter now classifies typed prompt-document blocks (`context`, `example input`, `example output`, `output format`, `constraint`, `generic`) so the editor can evolve beyond a raw message list.
 - Node workspace actions are now centralized in a dedicated action bar, and the right pane has been simplified to result-only `Prompt / Rendered` tabs.
 - Editor.js is now integrated into the left prompt-authoring pane with initial custom prompt block tools and adapter-based sync back to canonical prompt messages.
+- Prompt block authoring now includes a popup block picker, native drag-and-drop reorder, and delete confirmation for non-empty prompt blocks.
 
 ### Changed
 - Focus and structure graph views now handle proposal overlays separately instead of collapsing into a single full-graph view.

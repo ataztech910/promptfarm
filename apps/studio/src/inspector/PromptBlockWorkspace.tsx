@@ -12,6 +12,7 @@ import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
 import { cn } from "../lib/cn";
+import { Panel } from "../components/layout/Panel";
 import type { PromptEditableDraft, PromptWorkspaceBlock, PromptWorkspaceBlockKind, PromptWorkspaceVariableEntry } from "./promptDocumentAdapter";
 import { applyPromptWorkspaceBlocks, createPromptWorkspaceBlock, createPromptWorkspaceBlocks } from "./promptDocumentAdapter";
 
@@ -113,12 +114,39 @@ function summarizeBlock(block: PromptWorkspaceBlock): string {
   return content.length > 0 ? content : "No content yet";
 }
 
+function hasMeaningfulBlockContent(block: PromptWorkspaceBlock): boolean {
+  if (block.kind === "variables") {
+    return (block.entries ?? []).some((entry) => entry.key.trim().length > 0 || entry.value.trim().length > 0);
+  }
+  if (block.kind === "example") {
+    return (block.input ?? "").trim().length > 0 || (block.output ?? "").trim().length > 0;
+  }
+  if (block.kind === "context") {
+    return (block.label ?? "").trim().length > 0 || (block.content ?? "").trim().length > 0;
+  }
+  if (block.kind === "loop") {
+    return (
+      (block.variable ?? "").trim().length > 0 ||
+      (block.items ?? "").trim().length > 0 ||
+      (block.content ?? "").trim().length > 0
+    );
+  }
+  if (block.kind === "conditional") {
+    return (block.variable ?? "").trim().length > 0 || (block.content ?? "").trim().length > 0;
+  }
+  if (block.kind === "metadata") {
+    return (block.key ?? "").trim().length > 0 || (block.value ?? "").trim().length > 0;
+  }
+  return (block.content ?? "").trim().length > 0;
+}
+
 export function PromptBlockWorkspace({ workspaceKey, draft, onChangeDraft }: PromptBlockWorkspaceProps) {
   const [blocks, setBlocks] = useState<PromptWorkspaceBlock[]>(() => createPromptWorkspaceBlocks(draft));
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerQuery, setPickerQuery] = useState("");
   const [draggedBlockId, setDraggedBlockId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ blockId: string; position: "before" | "after" } | null>(null);
+  const [pendingDeleteBlockId, setPendingDeleteBlockId] = useState<string | null>(null);
 
   const filteredBlockOptions = useMemo(() => {
     const query = pickerQuery.trim().toLowerCase();
@@ -132,6 +160,10 @@ export function PromptBlockWorkspace({ workspaceKey, draft, onChangeDraft }: Pro
       );
     });
   }, [pickerQuery]);
+  const pendingDeleteBlock = useMemo(
+    () => (pendingDeleteBlockId ? blocks.find((block) => block.id === pendingDeleteBlockId) ?? null : null),
+    [blocks, pendingDeleteBlockId],
+  );
 
   useEffect(() => {
     setBlocks(createPromptWorkspaceBlocks(draft));
@@ -139,6 +171,7 @@ export function PromptBlockWorkspace({ workspaceKey, draft, onChangeDraft }: Pro
     setPickerQuery("");
     setDraggedBlockId(null);
     setDropTarget(null);
+    setPendingDeleteBlockId(null);
   }, [workspaceKey]);
 
   useEffect(() => {
@@ -178,6 +211,16 @@ export function PromptBlockWorkspace({ workspaceKey, draft, onChangeDraft }: Pro
     commit(blocks.filter((block) => block.id !== blockId));
   }
 
+  function requestRemoveBlock(blockId: string) {
+    const block = blocks.find((entry) => entry.id === blockId);
+    if (!block) return;
+    if (hasMeaningfulBlockContent(block)) {
+      setPendingDeleteBlockId(blockId);
+      return;
+    }
+    removeBlock(blockId);
+  }
+
   function addBlock(kind: PromptWorkspaceBlockKind) {
     commit([...blocks, createPromptWorkspaceBlock(kind)]);
   }
@@ -211,7 +254,7 @@ export function PromptBlockWorkspace({ workspaceKey, draft, onChangeDraft }: Pro
               onUpdate={(patch) => updateBlock(block.id, patch)}
               onToggle={() => updateBlock(block.id, { enabled: !block.enabled })}
               onToggleCollapse={() => updateBlock(block.id, { collapsed: !block.collapsed })}
-              onRemove={() => removeBlock(block.id)}
+              onRemove={() => requestRemoveBlock(block.id)}
               onMove={(direction) => moveBlock(block.id, direction)}
               onDragStart={() => setDraggedBlockId(block.id)}
               onDragEnd={() => {
@@ -264,6 +307,17 @@ export function PromptBlockWorkspace({ workspaceKey, draft, onChangeDraft }: Pro
             addBlock(kind);
             setPickerOpen(false);
             setPickerQuery("");
+          }}
+        />
+      ) : null}
+
+      {pendingDeleteBlock ? (
+        <PromptBlockDeleteDialog
+          block={pendingDeleteBlock}
+          onCancel={() => setPendingDeleteBlockId(null)}
+          onConfirm={() => {
+            removeBlock(pendingDeleteBlock.id);
+            setPendingDeleteBlockId(null);
           }}
         />
       ) : null}
@@ -463,6 +517,46 @@ function PromptBlockPickerDialog({
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function PromptBlockDeleteDialog({
+  block,
+  onCancel,
+  onConfirm,
+}: {
+  block: PromptWorkspaceBlock;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-background/70 p-6 backdrop-blur-sm">
+      <button
+        type="button"
+        className="absolute inset-0 cursor-default bg-transparent"
+        aria-label="Close delete block dialog"
+        onClick={onCancel}
+      />
+      <Panel className="relative z-10 w-full max-w-md border-border/80 bg-card/95 p-6 shadow-2xl">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">Delete Block</p>
+        <h2 className="mt-3 text-lg font-semibold text-foreground">{BLOCK_LABELS[block.kind]}</h2>
+        <p className="mt-2 text-sm text-muted-foreground">
+          This block already contains content. Do you want to remove it from the prompt workspace?
+        </p>
+        <div className="mt-4 rounded-lg border border-border/70 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
+          {summarizeBlock(block)}
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="outline" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button variant="secondary" onClick={onConfirm}>
+            <Trash2 className="h-4 w-4" />
+            Delete Block
+          </Button>
+        </div>
+      </Panel>
     </div>
   );
 }

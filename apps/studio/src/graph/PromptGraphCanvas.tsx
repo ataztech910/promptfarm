@@ -10,12 +10,11 @@ import {
 } from "@xyflow/react";
 import { STUDIO_NODE_TYPES } from "../nodes/nodeRegistry";
 import { useStudioStore } from "../state/studioStore";
-import type { StudioFlowNode, StudioGraph } from "./types";
+import type { StudioFlowNode } from "./types";
 import { buildProposalPreviewGraph } from "./adapters/proposalPreviewGraph";
 
 type PromptGraphCanvasProps = {
-  viewMode?: "focus" | "structure";
-  graphOverride?: StudioGraph | null;
+  layout?: "mind_map" | "org_chart" | "list";
   onNodeActivate?: () => void;
   onPaneActivate?: () => void;
   onPaneContextMenu?: (position: { x: number; y: number }) => void;
@@ -23,8 +22,7 @@ type PromptGraphCanvasProps = {
 };
 
 export function PromptGraphCanvas({
-  viewMode = "focus",
-  graphOverride = null,
+  layout = "mind_map",
   onNodeActivate,
   onPaneActivate,
   onPaneContextMenu,
@@ -43,15 +41,15 @@ export function PromptGraphCanvas({
   const focusedBlockId = useStudioStore((s) => s.focusedBlockId);
   const focusBlock = useStudioStore((s) => s.focusBlock);
   const [flowInstance, setFlowInstance] = useState<ReactFlowInstance<StudioFlowNode> | null>(null);
-  const rawNodes = graphOverride?.nodes ?? storeNodes;
-  const baseEdges = graphOverride?.edges ?? storeEdges;
+  const rawNodes = storeNodes;
+  const baseEdges = storeEdges;
   const visibleProposalSourceNodeIds = useMemo(() => {
-    if (viewMode !== "focus" || !canonicalPrompt) {
+    if (!canonicalPrompt) {
       return null;
     }
 
     return [focusedBlockId ? `block:${focusedBlockId}` : `prompt:${canonicalPrompt.metadata.id}`];
-  }, [canonicalPrompt, focusedBlockId, viewMode]);
+  }, [canonicalPrompt, focusedBlockId]);
   const proposalPreview = useMemo(
     () =>
       buildProposalPreviewGraph({
@@ -71,8 +69,8 @@ export function PromptGraphCanvas({
     [proposalPreview.nodes, rawNodes, selectedNodeId, selectedProposalNodeId],
   );
   const proposalNodeCount = proposalPreview.nodes.length;
-  const canvasInstanceKey = `${viewMode}:${graphOverride ? "override" : "store"}:${rawNodes.length}:${baseEdges.length}:${proposalPreview.nodes.length}:${proposalPreview.edges.length}`;
-  const disableGraphMutations = graphOverride !== null || proposalNodeCount > 0;
+  const canvasInstanceKey = `${layout}:store:${rawNodes.length}:${baseEdges.length}:${proposalPreview.nodes.length}:${proposalPreview.edges.length}`;
+  const disableGraphMutations = proposalNodeCount > 0;
 
   useEffect(() => {
     if (!flowInstance || proposalNodeCount === 0) {
@@ -97,7 +95,7 @@ export function PromptGraphCanvas({
       window.clearTimeout(timerId);
       cleanupAnimationFrames.forEach((frameId) => window.cancelAnimationFrame(frameId));
     };
-  }, [flowInstance, proposalNodeCount, viewMode, rawNodes.length, baseEdges.length]);
+  }, [flowInstance, proposalNodeCount, layout, rawNodes.length, baseEdges.length]);
 
   const onNodeClick: NodeMouseHandler = (_, rawNode) => {
     const node = rawNode as StudioFlowNode;
@@ -109,15 +107,15 @@ export function PromptGraphCanvas({
 
     setSelectedNodeId(node.id);
     onNodeActivate?.();
-    if (node.data.kind === "block" && viewMode === "focus") {
+    if (node.data.kind === "block") {
       focusBlock(node.data.properties.__blockId ?? node.data.properties.blockId ?? null);
       return;
     }
-    if (node.data.kind === "prompt" && viewMode === "focus") {
+    if (node.data.kind === "prompt") {
       focusBlock(null);
       return;
     }
-    if (node.data.kind === "use_prompt" && viewMode === "focus") {
+    if (node.data.kind === "use_prompt") {
       focusBlock(null);
     }
   };
@@ -161,6 +159,7 @@ export function PromptGraphCanvas({
         fitView
         minZoom={0.3}
         maxZoom={1.5}
+        nodesDraggable={layout === "mind_map" && !disableGraphMutations}
         nodesConnectable={false}
         deleteKeyCode={null}
         defaultEdgeOptions={{ type: "smoothstep" }}
