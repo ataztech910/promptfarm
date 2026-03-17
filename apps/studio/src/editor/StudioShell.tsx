@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Boxes, FolderTree, LogOut, ShieldCheck, TerminalSquare, UserRound, X } from "lucide-react";
+import { Boxes, FolderTree, LogOut, ShieldCheck, Sparkles, TerminalSquare, UserRound, X } from "lucide-react";
 import { Panel } from "../components/layout/Panel";
 import { PromptGraphCanvas } from "../graph/PromptGraphCanvas";
 import { resolveEditorSelection } from "../inspector/editorSession";
@@ -7,7 +7,7 @@ import { InspectorPanel } from "../inspector/InspectorPanel";
 import { ModelRegistryPanel } from "../runtime/ModelRegistryPanel";
 import { RuntimePreviewPanel, type RuntimeConsoleState } from "../runtime/RuntimePreviewPanel";
 import { useStudioStore } from "../state/studioStore";
-import { findPromptBlockReference, getSiblingBlockKinds, getSuggestedBlockKinds } from "../model/promptTree";
+import { findPromptBlockReference, getPromptBlockPath, getSiblingBlockKinds, getSuggestedBlockKinds } from "../model/promptTree";
 import { Button } from "../components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { cn } from "../lib/cn";
@@ -22,6 +22,7 @@ import { NodeWorkspaceResultsPanel } from "./NodeWorkspaceResultsPanel";
 
 type LeftPanelMode = "tree" | "models" | "account";
 type WorkspaceAuthorTab = "prompt" | "config";
+const IMPORT_REFINEMENT_TARGET_KEY = "promptfarm.importRefinementTarget";
 
 type CanvasMenuState =
   | null
@@ -83,6 +84,7 @@ export function StudioShell() {
   const setSelectedNodeId = useStudioStore((s) => s.setSelectedNodeId);
   const refreshSelectedScopePromptPreview = useStudioStore((s) => s.refreshSelectedScopePromptPreview);
   const recoverRemoteRuntimeForCurrentPrompt = useStudioStore((s) => s.recoverRemoteRuntimeForCurrentPrompt);
+  const runRuntimeAction = useStudioStore((s) => s.runRuntimeAction);
   const { logOut, user } = useStudioAuth();
   const [leftPanelMode, setLeftPanelMode] = useState<LeftPanelMode>("tree");
   const [inspectorOpen, setInspectorOpen] = useState(false);
@@ -91,6 +93,7 @@ export function StudioShell() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [logoutDialogOpen, setLogoutDialogOpen] = useState(false);
   const [workspaceAuthorTab, setWorkspaceAuthorTab] = useState<WorkspaceAuthorTab>("prompt");
+  const [importRefinementDismissed, setImportRefinementDismissed] = useState(false);
   const lastConsoleEventCountRef = useRef(0);
 
   const promptSelectionId = canonicalPrompt ? `prompt:${canonicalPrompt.metadata.id}` : null;
@@ -227,6 +230,58 @@ export function StudioShell() {
     };
   }, [canonicalPrompt, canvasMenu]);
 
+  const importedPromptHint = useMemo(() => {
+    if (!canonicalPrompt) {
+      return null;
+    }
+    const tags = canonicalPrompt.metadata.tags ?? [];
+    if (!tags.includes("imported") || !tags.includes("url_source")) {
+      return null;
+    }
+    const overviewBlockId = canonicalPrompt.spec.blocks.find((block) => block.id === "phase_import_overview")?.id ?? null;
+    const firstContentBlockId =
+      canonicalPrompt.spec.blocks.find((block) => block.id !== "phase_import_overview")?.id ?? canonicalPrompt.spec.blocks[0]?.id ?? null;
+    return {
+      firstBlockId: canonicalPrompt.spec.blocks[0]?.id ?? null,
+      overviewBlockId,
+      firstContentBlockId,
+      sourceUrl:
+        canonicalPrompt.spec.inputs.find((input) => input.name === "source_url")?.default && typeof canonicalPrompt.spec.inputs.find((input) => input.name === "source_url")?.default === "string"
+          ? (canonicalPrompt.spec.inputs.find((input) => input.name === "source_url")?.default as string)
+          : null,
+    };
+  }, [canonicalPrompt]);
+
+  const importedSectionState = useMemo(() => {
+    if (!canonicalPrompt || !importedPromptHint) {
+      return null;
+    }
+
+    const importedSections = canonicalPrompt.spec.blocks.filter((block) => block.id !== "phase_import_overview");
+    if (importedSections.length === 0) {
+      return {
+        sections: [] as typeof importedSections,
+        activeSectionId: null as string | null,
+        activeSectionIndex: -1,
+      };
+    }
+
+    const activeBlockId = currentSelection?.kind === "block" ? currentSelection.block.id : focusedBlockId;
+    const path = activeBlockId ? getPromptBlockPath(canonicalPrompt.spec.blocks, activeBlockId) : [];
+    const activeSection = path.find((block) => importedSections.some((section) => section.id === block.id)) ?? null;
+    const activeSectionIndex = activeSection ? importedSections.findIndex((section) => section.id === activeSection.id) : -1;
+
+    return {
+      sections: importedSections,
+      activeSectionId: activeSection?.id ?? importedPromptHint.firstContentBlockId ?? null,
+      activeSectionIndex: activeSectionIndex >= 0 ? activeSectionIndex : importedSections.findIndex((section) => section.id === importedPromptHint.firstContentBlockId),
+    };
+  }, [canonicalPrompt, currentSelection, focusedBlockId, importedPromptHint]);
+
+  useEffect(() => {
+    setImportRefinementDismissed(false);
+  }, [canonicalPrompt?.metadata.id]);
+
   function openRootInspector() {
     if (!canonicalPrompt || !promptSelectionId) return;
     focusBlock(null);
@@ -235,6 +290,134 @@ export function StudioShell() {
     setCanvasMenu(null);
     setCommandPaletteOpen(false);
   }
+
+  function openImportedOverview(blockId?: string | null) {
+    const targetBlockId = blockId ?? importedPromptHint?.firstBlockId ?? null;
+    if (!targetBlockId) {
+      openRootInspector();
+      return;
+    }
+    focusBlock(targetBlockId);
+    setInspectorOpen(true);
+    setCanvasMenu(null);
+    setCommandPaletteOpen(false);
+  }
+
+  function openImportedContent() {
+    const targetBlockId = importedPromptHint?.firstContentBlockId ?? null;
+    if (!targetBlockId) {
+      openImportedOverview();
+      return;
+    }
+    focusBlock(targetBlockId);
+    setInspectorOpen(true);
+    setCanvasMenu(null);
+    setCommandPaletteOpen(false);
+  }
+
+  function openImportedSectionByOffset(offset: -1 | 1) {
+    if (!importedSectionState || importedSectionState.sections.length === 0) {
+      return;
+    }
+
+    const currentIndex = importedSectionState.activeSectionIndex >= 0 ? importedSectionState.activeSectionIndex : 0;
+    const targetIndex = currentIndex + offset;
+    if (targetIndex < 0 || targetIndex >= importedSectionState.sections.length) {
+      return;
+    }
+
+    const targetBlockId = importedSectionState.sections[targetIndex]?.id ?? null;
+    if (!targetBlockId) {
+      return;
+    }
+
+    focusBlock(targetBlockId);
+    setInspectorOpen(true);
+    setCanvasMenu(null);
+    setCommandPaletteOpen(false);
+  }
+
+  function removeActiveImportedSection() {
+    if (!importedSectionState?.activeSectionId) {
+      return;
+    }
+
+    const currentIndex = importedSectionState.sections.findIndex((section) => section.id === importedSectionState.activeSectionId);
+    const fallbackBlockId =
+      importedSectionState.sections[currentIndex + 1]?.id ??
+      importedSectionState.sections[currentIndex - 1]?.id ??
+      importedPromptHint?.overviewBlockId ??
+      null;
+
+    applyGraphIntent({
+      type: "block.remove",
+      blockId: importedSectionState.activeSectionId,
+    });
+
+    if (fallbackBlockId && fallbackBlockId !== importedSectionState.activeSectionId) {
+      focusBlock(fallbackBlockId);
+      setInspectorOpen(true);
+    } else {
+      focusBlock(null);
+    }
+    setCanvasMenu(null);
+    setCommandPaletteOpen(false);
+  }
+
+  function removeImportedOverview() {
+    const blockId = importedPromptHint?.overviewBlockId ?? null;
+    if (!blockId) {
+      return;
+    }
+    applyGraphIntent({
+      type: "block.remove",
+      blockId,
+    });
+    setImportRefinementDismissed(true);
+    setCanvasMenu(null);
+    setCommandPaletteOpen(false);
+  }
+
+  useEffect(() => {
+    if (!canonicalPrompt || typeof window === "undefined") {
+      return;
+    }
+
+    const rawTarget = window.sessionStorage.getItem(IMPORT_REFINEMENT_TARGET_KEY);
+    if (!rawTarget) {
+      return;
+    }
+
+    let target: { promptId?: string; blockId?: string } | null = null;
+    try {
+      target = JSON.parse(rawTarget) as { promptId?: string; blockId?: string };
+    } catch {
+      window.sessionStorage.removeItem(IMPORT_REFINEMENT_TARGET_KEY);
+      return;
+    }
+
+    if (target?.promptId !== canonicalPrompt.metadata.id) {
+      return;
+    }
+
+    window.sessionStorage.removeItem(IMPORT_REFINEMENT_TARGET_KEY);
+    const targetBlockId = target.blockId ?? importedPromptHint?.firstBlockId ?? null;
+    if (!targetBlockId) {
+      focusBlock(null);
+      if (promptSelectionId) {
+        setSelectedNodeId(promptSelectionId);
+      }
+      setInspectorOpen(true);
+      setCanvasMenu(null);
+      setCommandPaletteOpen(false);
+      return;
+    }
+
+    focusBlock(targetBlockId);
+    setInspectorOpen(true);
+    setCanvasMenu(null);
+    setCommandPaletteOpen(false);
+  }, [canonicalPrompt, focusBlock, importedPromptHint?.firstBlockId, promptSelectionId, setSelectedNodeId]);
 
   function handleLayoutChange(layout: "mind_map" | "org_chart" | "list") {
     setCanvasLayout(layout);
@@ -419,6 +602,76 @@ export function StudioShell() {
             </div>
 
             <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+              {importedPromptHint && !importRefinementDismissed ? (
+                <div className="px-3 pt-3">
+                  <Panel className="border-primary/30 bg-primary/5 px-4 py-3">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 text-sm font-semibold">
+                          <Sparkles className="h-4 w-4 text-primary" />
+                          Imported Skill
+                        </div>
+                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                          This prompt was created from URL import. Review the imported overview, prune the tree, then resolve the root prompt to inspect the composed skill.
+                        </p>
+                        {importedPromptHint.sourceUrl ? (
+                          <div className="mt-2 break-all text-[11px] text-muted-foreground">{importedPromptHint.sourceUrl}</div>
+                        ) : null}
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Button type="button" variant="secondary" size="sm" onClick={() => openImportedOverview()}>
+                          Review imported overview
+                        </Button>
+                        <Button type="button" variant="outline" size="sm" onClick={openImportedContent}>
+                          Open first imported section
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => openImportedSectionByOffset(-1)}
+                          disabled={!importedSectionState || importedSectionState.activeSectionIndex <= 0}
+                        >
+                          Previous section
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => openImportedSectionByOffset(1)}
+                          disabled={
+                            !importedSectionState ||
+                            importedSectionState.activeSectionIndex < 0 ||
+                            importedSectionState.activeSectionIndex >= importedSectionState.sections.length - 1
+                          }
+                        >
+                          Next section
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={removeActiveImportedSection}
+                          disabled={!importedSectionState?.activeSectionId}
+                        >
+                          Remove current section
+                        </Button>
+                        {importedPromptHint.overviewBlockId ? (
+                          <Button type="button" variant="outline" size="sm" onClick={removeImportedOverview}>
+                            Remove overview block
+                          </Button>
+                        ) : null}
+                        <Button type="button" variant="outline" size="sm" onClick={() => runRuntimeAction("resolve")}>
+                          Resolve root
+                        </Button>
+                        <Button type="button" variant="ghost" size="sm" onClick={() => setImportRefinementDismissed(true)}>
+                          Dismiss
+                        </Button>
+                      </div>
+                    </div>
+                  </Panel>
+                </div>
+              ) : null}
               <div className="relative min-h-0 flex-1 overflow-hidden p-3">
                 <Panel className="h-full overflow-hidden">
                   <PromptGraphCanvas

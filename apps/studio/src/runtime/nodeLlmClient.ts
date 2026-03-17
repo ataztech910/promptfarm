@@ -254,7 +254,7 @@ export function getStudioNodeLlmPresetSettings(
         baseUrl: "http://localhost:11434/v1",
         apiKey: "",
         providerLabel: "ollama_openai",
-        model: currentSettings.model || "llama3.2",
+        model: currentSettings.model || "qwen3:14b",
       });
     case "openai_cloud":
       return normalizeStudioNodeLlmSettings({

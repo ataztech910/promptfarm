@@ -29,6 +29,41 @@ type PromptFarmStudioServer = {
   close(): Promise<void>;
 };
 
+type StudioUrlImportPageSummary = {
+  url: string;
+  title: string | null;
+  status: "ready" | "error";
+  source: "root" | "linked";
+  contentChars: number;
+  excerpt: string;
+  error?: string;
+};
+
+type StudioUrlImportScope = "single_page" | "section" | "site";
+
+type StudioUrlImportDiagnostics = {
+  mode: StudioUrlImportScope;
+  maxPages: number;
+  scopeRoot: string;
+  scannedPages: number;
+  rawLinksSeen: number;
+  acceptedLinks: number;
+  rejectedExternal: number;
+  rejectedOutOfScope: number;
+  rejectedNonDocument: number;
+  rejectedDuplicate: number;
+};
+
+type StudioUrlImportDiscoveryPayload = {
+  requestedUrl: string;
+  finalUrl: string;
+  title: string | null;
+  discoveredPageCount: number;
+  truncated: boolean;
+  pages: StudioUrlImportPageSummary[];
+  diagnostics: StudioUrlImportDiagnostics;
+};
+
 type PromptFarmStudioServerOptions = {
   host: string;
   port: number;
@@ -139,6 +174,446 @@ function createSessionCookie(sessionToken: string, maxAgeSeconds: number): strin
 
 function createClearedSessionCookie(): string {
   return "promptfarm_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0";
+}
+
+function decodeHtmlEntities(value: string): string {
+  return value
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'");
+}
+
+function normalizeWhitespace(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function extractHtmlTitle(html: string): string | null {
+  const match = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html);
+  if (!match) {
+    return null;
+  }
+  const title = normalizeWhitespace(decodeHtmlEntities(match[1] ?? ""));
+  return title.length > 0 ? title : null;
+}
+
+function extractMarkdownTitle(markdown: string): string | null {
+  const frontmatterMatch = /(?:^|\n)title:\s*"([^"\n]+)"(?:\n|$)/i.exec(markdown);
+  if (frontmatterMatch) {
+    const title = normalizeWhitespace(frontmatterMatch[1] ?? "");
+    if (title.length > 0) {
+      return title;
+    }
+  }
+
+  const headingMatch = /(?:^|\n)#\s+(.+?)(?:\n|$)/.exec(markdown);
+  if (!headingMatch) {
+    return null;
+  }
+  const title = normalizeWhitespace(headingMatch[1] ?? "");
+  return title.length > 0 ? title : null;
+}
+
+function stripHtmlToText(html: string): string {
+  return normalizeWhitespace(
+    decodeHtmlEntities(
+      html
+        .replace(/<script[\s\S]*?<\/script>/gi, " ")
+        .replace(/<style[\s\S]*?<\/style>/gi, " ")
+        .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
+        .replace(/<!--([\s\S]*?)-->/g, " ")
+        .replace(/<[^>]+>/g, " "),
+    ),
+  );
+}
+
+function createExcerpt(text: string, maxLength = 240): string {
+  if (text.length <= maxLength) {
+    return text;
+  }
+  return `${text.slice(0, maxLength).trimEnd()}...`;
+}
+
+function isNavigableDocumentUrl(value: URL, rootOrigin: string): boolean {
+  if (!["http:", "https:"].includes(value.protocol)) {
+    return false;
+  }
+  if (value.origin !== rootOrigin) {
+    return false;
+  }
+  if (value.pathname.length === 0) {
+    return true;
+  }
+  return !/\.(png|jpe?g|gif|svg|webp|ico|css|js|mjs|json|xml|pdf|zip|gz|mp4|mov|avi|woff2?)$/i.test(value.pathname);
+}
+
+function createUrlImportDiagnostics(mode: StudioUrlImportScope, maxPages: number, scopeRoot: string): StudioUrlImportDiagnostics {
+  return {
+    mode,
+    maxPages,
+    scopeRoot,
+    scannedPages: 0,
+    rawLinksSeen: 0,
+    acceptedLinks: 0,
+    rejectedExternal: 0,
+    rejectedOutOfScope: 0,
+    rejectedNonDocument: 0,
+    rejectedDuplicate: 0,
+  };
+}
+
+function normalizeSectionPathname(pathname: string): string {
+  if (pathname === "/" || pathname.length === 0) {
+    return "/";
+  }
+  return pathname.endsWith("/") ? pathname : `${pathname}/`;
+}
+
+function getParentSectionPathname(pathname: string): string | null {
+  const normalized = normalizeSectionPathname(pathname);
+  if (normalized === "/") {
+    return null;
+  }
+  const trimmed = normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
+  const lastSlash = trimmed.lastIndexOf("/");
+  if (lastSlash <= 0) {
+    return "/";
+  }
+  return `${trimmed.slice(0, lastSlash + 1)}`;
+}
+
+function isUrlWithinScope(input: { candidate: URL; rootUrl: URL; scope: StudioUrlImportScope }): boolean {
+  if (input.candidate.origin !== input.rootUrl.origin) {
+    return false;
+  }
+  if (input.scope === "site") {
+    return true;
+  }
+  if (input.scope === "single_page") {
+    return input.candidate.pathname === input.rootUrl.pathname;
+  }
+
+  const rootPath = normalizeSectionPathname(input.rootUrl.pathname);
+  const candidatePath = input.candidate.pathname;
+  return candidatePath === input.rootUrl.pathname || candidatePath.startsWith(rootPath);
+}
+
+function mergeUrlImportDiagnostics(
+  base: StudioUrlImportDiagnostics,
+  next: Partial<Omit<StudioUrlImportDiagnostics, "mode" | "maxPages">>,
+): StudioUrlImportDiagnostics {
+  return {
+    ...base,
+    scopeRoot: next.scopeRoot ?? base.scopeRoot,
+    scannedPages: base.scannedPages + (next.scannedPages ?? 0),
+    rawLinksSeen: base.rawLinksSeen + (next.rawLinksSeen ?? 0),
+    acceptedLinks: base.acceptedLinks + (next.acceptedLinks ?? 0),
+    rejectedExternal: base.rejectedExternal + (next.rejectedExternal ?? 0),
+    rejectedOutOfScope: base.rejectedOutOfScope + (next.rejectedOutOfScope ?? 0),
+    rejectedNonDocument: base.rejectedNonDocument + (next.rejectedNonDocument ?? 0),
+    rejectedDuplicate: base.rejectedDuplicate + (next.rejectedDuplicate ?? 0),
+  };
+}
+
+function extractDocumentLinks(input: {
+  html: string;
+  baseUrl: string;
+  scopeUrl: string;
+  scope: StudioUrlImportScope;
+  remainingCapacity: number;
+  seen: Set<string>;
+}): { urls: string[]; truncated: boolean; diagnostics: StudioUrlImportDiagnostics } {
+  const base = new URL(input.baseUrl);
+  const root = new URL(input.scopeUrl);
+  const urls: string[] = [];
+  let overflow = false;
+  const diagnostics = createUrlImportDiagnostics(input.scope, input.seen.size + Math.max(input.remainingCapacity, 0), root.pathname);
+  const candidatePatterns = [
+    /href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi,
+    /"(?:to|href|url)"\s*:\s*"([^"]+)"/gi,
+    /\[[^\]]+\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g,
+  ];
+
+  function considerCandidate(rawValue: string): void {
+    const href = rawValue.replace(/\\\//g, "/").trim();
+    if (href) {
+      diagnostics.rawLinksSeen += 1;
+    }
+    if (!href || href.startsWith("#") || href.startsWith("javascript:") || href.startsWith("mailto:") || href.startsWith("tel:")) {
+      return;
+    }
+
+    let candidate: URL;
+    try {
+      candidate = new URL(href, base);
+    } catch {
+      return;
+    }
+
+    candidate.hash = "";
+    if (candidate.origin !== root.origin) {
+      diagnostics.rejectedExternal += 1;
+      return;
+    }
+
+    if (!isNavigableDocumentUrl(candidate, base.origin)) {
+      diagnostics.rejectedNonDocument += 1;
+      return;
+    }
+
+    if (!isUrlWithinScope({ candidate, rootUrl: root, scope: input.scope })) {
+      diagnostics.rejectedOutOfScope += 1;
+      return;
+    }
+
+    const normalized = candidate.toString();
+    if (normalized === base.toString() || input.seen.has(normalized)) {
+      diagnostics.rejectedDuplicate += 1;
+      return;
+    }
+
+    if (urls.length >= input.remainingCapacity) {
+      overflow = true;
+      return;
+    }
+
+    diagnostics.acceptedLinks += 1;
+    input.seen.add(normalized);
+    urls.push(normalized);
+  }
+
+  for (const pattern of candidatePatterns) {
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(input.html)) !== null) {
+      const rawValue = (match[1] ?? match[2] ?? match[3] ?? "").trim();
+      considerCandidate(rawValue);
+    }
+  }
+
+  return {
+    urls,
+    truncated: overflow,
+    diagnostics,
+  };
+}
+
+async function fetchDocumentSummary(input: {
+  url: string;
+  source: "root" | "linked";
+}): Promise<{ page: StudioUrlImportPageSummary; finalUrl: string; html: string | null }> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+
+  try {
+    const response = await fetch(input.url, {
+      headers: {
+        Accept: "text/html, text/plain;q=0.9",
+        "User-Agent": "PromptFarm Studio URL Import/0.1",
+      },
+      redirect: "follow",
+      signal: controller.signal,
+    });
+
+    const finalUrl = response.url || input.url;
+    if (!response.ok) {
+      return {
+        finalUrl,
+        html: null,
+        page: {
+          url: finalUrl,
+          title: null,
+          status: "error",
+          source: input.source,
+          contentChars: 0,
+          excerpt: "",
+          error: `HTTP ${response.status} ${response.statusText}`,
+        },
+      };
+    }
+
+    const contentType = (response.headers.get("content-type") ?? "").toLowerCase();
+    const body = await response.text();
+    const isHtml = contentType.includes("html");
+    const isMarkdown = contentType.includes("markdown") || finalUrl.endsWith(".md");
+    const text = isHtml ? stripHtmlToText(body) : normalizeWhitespace(body);
+    const title = isHtml ? extractHtmlTitle(body) : isMarkdown ? extractMarkdownTitle(body) : null;
+
+    return {
+      finalUrl,
+      html: isHtml || isMarkdown ? body : null,
+      page: {
+        url: finalUrl,
+        title,
+        status: "ready",
+        source: input.source,
+        contentChars: text.length,
+        excerpt: createExcerpt(text),
+      },
+    };
+  } catch (error) {
+    return {
+      finalUrl: input.url,
+      html: null,
+      page: {
+        url: input.url,
+        title: null,
+        status: "error",
+        source: input.source,
+        contentChars: 0,
+        excerpt: "",
+        error: error instanceof Error ? error.message : String(error),
+      },
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function discoverUrlImport(input: {
+  url: string;
+  maxPages?: number;
+  scope?: StudioUrlImportScope;
+}): Promise<StudioUrlImportDiscoveryPayload> {
+  const requestedUrl = typeof input.url === "string" ? input.url.trim() : "";
+  if (requestedUrl.length === 0) {
+    throw new Error("URL import request must include a non-empty url.");
+  }
+
+  let normalizedUrl: URL;
+  try {
+    normalizedUrl = new URL(requestedUrl);
+  } catch {
+    throw new Error(`Invalid URL: ${requestedUrl}`);
+  }
+
+  if (!["http:", "https:"].includes(normalizedUrl.protocol)) {
+    throw new Error("Only http and https URLs are supported.");
+  }
+
+  const maxPages = Math.min(Math.max(Number(input.maxPages ?? 12), 1), 100);
+  const scope: StudioUrlImportScope =
+    input.scope === "single_page" || input.scope === "site" || input.scope === "section" ? input.scope : "section";
+  const root = await fetchDocumentSummary({
+    url: normalizedUrl.toString(),
+    source: "root",
+  });
+
+  const pages: StudioUrlImportPageSummary[] = [root.page];
+  let diagnostics = createUrlImportDiagnostics(scope, maxPages, new URL(root.finalUrl).pathname);
+  if (root.page.status !== "ready") {
+    throw new Error(root.page.error ?? `Failed to load ${requestedUrl}.`);
+  }
+
+  let truncated = false;
+  const rootUrl = root.finalUrl;
+  const queue: string[] = [];
+  const seen = new Set<string>([root.finalUrl]);
+  let effectiveScopeUrl = root.finalUrl;
+
+  if (scope !== "single_page" && root.html) {
+    let discovery = extractDocumentLinks({
+      html: root.html,
+      baseUrl: root.finalUrl,
+      scopeUrl: effectiveScopeUrl,
+      scope,
+      remainingCapacity: Math.max(maxPages - seen.size, 0),
+      seen,
+    });
+    if (scope === "section" && discovery.urls.length === 0) {
+      let fallbackPath = getParentSectionPathname(new URL(root.finalUrl).pathname);
+      while (fallbackPath) {
+        const fallbackUrl = new URL(root.finalUrl);
+        fallbackUrl.pathname = fallbackPath;
+        fallbackUrl.search = "";
+        fallbackUrl.hash = "";
+        const fallbackSeen = new Set<string>([root.finalUrl]);
+        const fallbackDiscovery = extractDocumentLinks({
+          html: root.html,
+          baseUrl: root.finalUrl,
+          scopeUrl: fallbackUrl.toString(),
+          scope,
+          remainingCapacity: Math.max(maxPages - fallbackSeen.size, 0),
+          seen: fallbackSeen,
+        });
+        if (fallbackDiscovery.urls.length > 0) {
+          effectiveScopeUrl = fallbackUrl.toString();
+          discovery = fallbackDiscovery;
+          seen.clear();
+          for (const item of fallbackSeen) {
+            seen.add(item);
+          }
+          break;
+        }
+        fallbackPath = getParentSectionPathname(fallbackPath);
+      }
+    }
+    diagnostics = mergeUrlImportDiagnostics(diagnostics, {
+      scopeRoot: discovery.diagnostics.scopeRoot,
+      scannedPages: 1,
+      rawLinksSeen: discovery.diagnostics.rawLinksSeen,
+      acceptedLinks: discovery.diagnostics.acceptedLinks,
+      rejectedExternal: discovery.diagnostics.rejectedExternal,
+      rejectedOutOfScope: discovery.diagnostics.rejectedOutOfScope,
+      rejectedNonDocument: discovery.diagnostics.rejectedNonDocument,
+      rejectedDuplicate: discovery.diagnostics.rejectedDuplicate,
+    });
+    queue.push(...discovery.urls);
+    truncated ||= discovery.truncated;
+  } else if (root.html) {
+    diagnostics = mergeUrlImportDiagnostics(diagnostics, {
+      scannedPages: 1,
+    });
+  }
+
+  while (queue.length > 0 && pages.length < maxPages) {
+    const nextUrl = queue.shift();
+    if (!nextUrl) {
+      continue;
+    }
+
+    const result = await fetchDocumentSummary({
+      url: nextUrl,
+      source: "linked",
+    });
+    pages.push(result.page);
+
+    if (result.page.status !== "ready" || !result.html || scope === "single_page" || pages.length >= maxPages) {
+      continue;
+    }
+
+    const discovery = extractDocumentLinks({
+      html: result.html,
+      baseUrl: result.finalUrl,
+      scopeUrl: effectiveScopeUrl,
+      scope,
+      remainingCapacity: Math.max(maxPages - seen.size, 0),
+      seen,
+    });
+    diagnostics = mergeUrlImportDiagnostics(diagnostics, {
+      scopeRoot: discovery.diagnostics.scopeRoot,
+      scannedPages: 1,
+      rawLinksSeen: discovery.diagnostics.rawLinksSeen,
+      acceptedLinks: discovery.diagnostics.acceptedLinks,
+      rejectedExternal: discovery.diagnostics.rejectedExternal,
+      rejectedOutOfScope: discovery.diagnostics.rejectedOutOfScope,
+      rejectedNonDocument: discovery.diagnostics.rejectedNonDocument,
+      rejectedDuplicate: discovery.diagnostics.rejectedDuplicate,
+    });
+    queue.push(...discovery.urls);
+    truncated ||= discovery.truncated;
+  }
+
+  return {
+    requestedUrl,
+    finalUrl: root.finalUrl,
+    title: root.page.title,
+    discoveredPageCount: pages.length + (truncated ? 1 : 0),
+    truncated,
+    pages,
+    diagnostics,
+  };
 }
 
 function matchPromptRuntimeRoute(url: URL): { promptId: string } | null {
@@ -358,6 +833,33 @@ async function handleApiRequest(
     if (!authenticatedUserId) {
       writeJson(response, 401, {
         error: "Studio API requires an authenticated local session.",
+      });
+      return true;
+    }
+  }
+
+  if (url.pathname === "/api/studio/url-import/discover") {
+    if (request.method !== "POST") {
+      writeJson(response, 405, {
+        error: `Method ${request.method ?? "UNKNOWN"} is not allowed for URL import discovery routes.`,
+      });
+      return true;
+    }
+
+    try {
+      const body = (await readJsonRequestBody(request)) as { url?: unknown; maxPages?: unknown; scope?: unknown };
+      const discovery = await discoverUrlImport({
+        url: typeof body?.url === "string" ? body.url : "",
+        ...(typeof body?.maxPages === "number" ? { maxPages: body.maxPages } : {}),
+        ...(body?.scope === "single_page" || body?.scope === "section" || body?.scope === "site"
+          ? { scope: body.scope }
+          : {}),
+      });
+      writeJson(response, 200, discovery);
+      return true;
+    } catch (error) {
+      writeJson(response, 400, {
+        error: error instanceof Error ? error.message : "Failed to discover URL import source.",
       });
       return true;
     }

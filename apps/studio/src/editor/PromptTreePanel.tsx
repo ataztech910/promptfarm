@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { closestCenter, DndContext, DragOverlay, PointerSensor, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ChevronRight, Eye, EyeOff, FileText, FolderTree, GitBranchPlus, GripVertical, Link2, Plus, Trash2, type LucideIcon } from "lucide-react";
+import { ChevronRight, ExternalLink, Eye, EyeOff, FileText, FolderTree, GitBranchPlus, GripVertical, Link2, Plus, Sparkles, Trash2, type LucideIcon } from "lucide-react";
 import type { Prompt, PromptBlock, PromptBlockKind } from "@promptfarm/core";
 import { getAllowedPromptBlockKinds } from "@promptfarm/core";
 import {
@@ -22,10 +22,24 @@ import {
   getSiblingBlockKinds,
   getSuggestedBlockKinds,
 } from "../model/promptTree";
-import { listStudioPromptDocumentsFromRemote, type StudioPromptDocumentSummary } from "../runtime/studioPromptDocumentRemote";
+import {
+  promotePromptBlockToSkillModule,
+  readSkillModuleReference,
+  replacePromptBlockWithSkillModuleReference,
+  type SkillModuleReference,
+} from "../model/skillModulePromotion";
+import {
+  listStudioPromptDocumentsFromRemote,
+  readStudioPromptDocumentFromLocalCacheSnapshot,
+  readStudioPromptDocumentFromRemote,
+  type StudioPromptDocumentRecord,
+  type StudioPromptDocumentSummary,
+  writeStudioPromptDocumentToRemote,
+} from "../runtime/studioPromptDocumentRemote";
 import { useStudioStore } from "../state/studioStore";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { toast } from "sonner";
+import { Input } from "../components/ui/input";
 
 type VisibleTreeNode = {
   id: string;
@@ -62,6 +76,10 @@ function formatBlockMeta(block: PromptBlock, childKind: PromptBlockKind | null, 
   return canHaveChildren
     ? `${formatBlockKind(block.kind)} • ${block.children.length} child${block.children.length === 1 ? "" : "ren"}`
     : formatBlockKind(block.kind);
+}
+
+function formatModuleReferenceMeta(reference: SkillModuleReference): string {
+  return `module reference • ${reference.inputNames.length} var${reference.inputNames.length === 1 ? "" : "s"}`;
 }
 
 function collectVisibleTreeNodes(
@@ -185,6 +203,9 @@ function TreeNodeRow({
   onAddSibling,
   onToggleHidden,
   onDelete,
+  onPromote,
+  onOpenModule,
+  onReuse,
 }: {
   node: VisibleTreeNode;
   artifactType: Prompt["spec"]["artifact"]["type"];
@@ -195,6 +216,9 @@ function TreeNodeRow({
   onAddSibling: (parentId: string | null, kind: PromptBlockKind) => void;
   onToggleHidden: (id: string) => void;
   onDelete: (id: string) => void;
+  onPromote: (id: string) => void;
+  onOpenModule: (promptId: string) => void;
+  onReuse: (id: string) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: node.id });
   const style = {
@@ -202,6 +226,7 @@ function TreeNodeRow({
     transition,
   };
   const hasChildren = node.block.children.length > 0;
+  const moduleReference = readSkillModuleReference(node.block);
 
   return (
     <div
@@ -246,7 +271,9 @@ function TreeNodeRow({
         <FileText size={13} className={cn("shrink-0", isSelected ? "text-primary" : "text-muted-foreground")} />
         <div className="min-w-0">
           <div className="truncate text-[13px] font-medium text-foreground">{node.block.title}</div>
-          <div className="truncate text-[11px] text-muted-foreground">{formatBlockMeta(node.block, node.childKind, artifactType)}</div>
+          <div className="truncate text-[11px] text-muted-foreground">
+            {moduleReference ? formatModuleReferenceMeta(moduleReference) : formatBlockMeta(node.block, node.childKind, artifactType)}
+          </div>
         </div>
       </div>
 
@@ -263,6 +290,12 @@ function TreeNodeRow({
             label={node.isHidden ? "Show branch in root prompt" : "Hide branch from root prompt"}
             onClick={() => onToggleHidden(node.id)}
           />
+          {moduleReference ? (
+            <ActionButton icon={ExternalLink} label="Open module" onClick={() => onOpenModule(moduleReference.promptId)} />
+          ) : (
+            <ActionButton icon={Link2} label="Reuse existing skill" onClick={() => onReuse(node.id)} />
+          )}
+          {!moduleReference ? <ActionButton icon={Sparkles} label="Promote to reusable skill" onClick={() => onPromote(node.id)} /> : null}
           <ActionButton icon={Trash2} label="Delete" danger onClick={() => onDelete(node.id)} />
         </div>
       </div>
@@ -332,6 +365,7 @@ export function PromptTreePanel({ onSelectRoot, onSelectBlock }: PromptTreePanel
   const focusedBlockId = useStudioStore((s) => s.focusedBlockId);
   const selectedNodeId = useStudioStore((s) => s.selectedNodeId);
   const currentProjectId = useStudioStore((s) => s.currentProjectId);
+  const currentProjectName = useStudioStore((s) => s.currentProjectName);
   const collapsedBlockIds = useStudioStore((s) => s.collapsedBlockIds);
   const hiddenBlockIds = useStudioStore((s) => s.hiddenBlockIds);
   const hiddenDependencyPromptIds = useStudioStore((s) => s.hiddenDependencyPromptIds);
@@ -345,9 +379,20 @@ export function PromptTreePanel({ onSelectRoot, onSelectBlock }: PromptTreePanel
   const detachPromptDependency = useStudioStore((s) => s.detachPromptDependency);
   const applyGraphIntent = useStudioStore((s) => s.applyGraphIntent);
   const clearSyncIssues = useStudioStore((s) => s.clearSyncIssues);
+  const hydratePromptDocument = useStudioStore((s) => s.hydratePromptDocument);
   const [pendingMove, setPendingMove] = useState<PendingMove | null>(null);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [pendingDetachDependency, setPendingDetachDependency] = useState<string | null>(null);
+  const [pendingPromotion, setPendingPromotion] = useState<string | null>(null);
+  const [promotionTitle, setPromotionTitle] = useState("");
+  const [promotionOpenInNewTab, setPromotionOpenInNewTab] = useState(true);
+  const [promotionSubmitting, setPromotionSubmitting] = useState(false);
+  const [pendingReuse, setPendingReuse] = useState<string | null>(null);
+  const [reusePromptId, setReusePromptId] = useState<string>("");
+  const [reuseSubmitting, setReuseSubmitting] = useState(false);
+  const [reusePreviewRecord, setReusePreviewRecord] = useState<StudioPromptDocumentRecord | null>(null);
+  const [reusePreviewStatus, setReusePreviewStatus] = useState<"idle" | "loading" | "error">("idle");
+  const [reusePreviewError, setReusePreviewError] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [availablePrompts, setAvailablePrompts] = useState<StudioPromptDocumentSummary[]>([]);
   const [promptsStatus, setPromptsStatus] = useState<"idle" | "loading" | "failure">("idle");
@@ -387,6 +432,13 @@ export function PromptTreePanel({ onSelectRoot, onSelectBlock }: PromptTreePanel
       };
     });
   }, [availablePrompts, canonicalPrompt, hiddenDependencySet]);
+
+  const reusablePromptCandidates = useMemo(() => {
+    if (!canonicalPrompt) {
+      return [];
+    }
+    return availablePrompts.filter((prompt) => prompt.artifactType === canonicalPrompt.spec.artifact.type);
+  }, [availablePrompts, canonicalPrompt]);
 
   useEffect(() => {
     let cancelled = false;
@@ -430,6 +482,48 @@ export function PromptTreePanel({ onSelectRoot, onSelectBlock }: PromptTreePanel
     clearSyncIssues();
   }, [clearSyncIssues, syncIssues]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!pendingReuse || !reusePromptId) {
+      setReusePreviewRecord(null);
+      setReusePreviewStatus("idle");
+      setReusePreviewError(null);
+      return;
+    }
+
+    const localRecord = readStudioPromptDocumentFromLocalCacheSnapshot(reusePromptId);
+    setReusePreviewRecord(localRecord);
+    setReusePreviewStatus(localRecord ? "idle" : "loading");
+    setReusePreviewError(null);
+
+    void readStudioPromptDocumentFromRemote(reusePromptId)
+      .then((record) => {
+        if (cancelled) {
+          return;
+        }
+        setReusePreviewRecord(record);
+        if (!record) {
+          setReusePreviewStatus("error");
+          setReusePreviewError(`Prompt "${reusePromptId}" could not be loaded.`);
+          return;
+        }
+        setReusePreviewStatus("idle");
+        setReusePreviewError(null);
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+        setReusePreviewStatus("error");
+        setReusePreviewError(error instanceof Error ? error.message : String(error));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [pendingReuse, reusePromptId]);
+
   if (!canonicalPrompt) {
     return null;
   }
@@ -443,6 +537,8 @@ export function PromptTreePanel({ onSelectRoot, onSelectBlock }: PromptTreePanel
   const moveTargetData = pendingMove ? findPromptBlockById(canonicalPrompt.spec.blocks, pendingMove.overId) : null;
   const deleteNodeData = pendingDelete ? findPromptBlockById(canonicalPrompt.spec.blocks, pendingDelete) : null;
   const rootSelectionId = `prompt:${canonicalPrompt.metadata.id}`;
+  const reusePreviewTags = reusePreviewRecord?.prompt.metadata.tags ?? [];
+  const reusePreviewIsSkillModule = reusePreviewTags.includes("skill_module");
 
   function handleSelect(id: string) {
     focusBlock(id);
@@ -467,6 +563,25 @@ export function PromptTreePanel({ onSelectRoot, onSelectBlock }: PromptTreePanel
       return;
     }
     applyGraphIntent({ type: "block.add", kind: rootKind, parentBlockId: null });
+  }
+
+  function handlePromoteNode(blockId: string) {
+    const block = canonicalPrompt ? findPromptBlockById(canonicalPrompt.spec.blocks, blockId) : null;
+    setPendingPromotion(blockId);
+    setPromotionTitle(block ? `${block.title} Skill Module` : "Reusable Skill Module");
+    setPromotionOpenInNewTab(true);
+  }
+
+  function handleReuseNode(blockId: string) {
+    setPendingReuse(blockId);
+    setReusePromptId(reusablePromptCandidates[0]?.promptId ?? "");
+  }
+
+  function handleOpenModule(promptId: string) {
+    if (typeof window === "undefined") {
+      return;
+    }
+    window.open(`/studio/prompts/${encodeURIComponent(promptId)}`, "_blank", "noopener,noreferrer");
   }
 
   function handleDragStart(event: DragStartEvent) {
@@ -530,6 +645,89 @@ export function PromptTreePanel({ onSelectRoot, onSelectBlock }: PromptTreePanel
     }
     detachPromptDependency(pendingDetachDependency);
     setPendingDetachDependency(null);
+  }
+
+  async function confirmPromotion(): Promise<void> {
+    if (!canonicalPrompt || !pendingPromotion) {
+      return;
+    }
+
+    setPromotionSubmitting(true);
+    try {
+      const result = promotePromptBlockToSkillModule({
+        prompt: canonicalPrompt,
+        blockId: pendingPromotion,
+        moduleTitle: promotionTitle,
+      });
+
+      await Promise.all([
+        writeStudioPromptDocumentToRemote({
+          prompt: result.modulePrompt,
+          projectId: currentProjectId,
+        }),
+        writeStudioPromptDocumentToRemote({
+          prompt: result.updatedPrompt,
+          projectId: currentProjectId,
+        }),
+      ]);
+
+      hydratePromptDocument(result.updatedPrompt, `promote://${result.referenceBlockId}`, {
+        projectId: currentProjectId,
+        projectName: currentProjectName,
+      });
+
+      if (promotionOpenInNewTab && typeof window !== "undefined") {
+        window.open(`/studio/prompts/${encodeURIComponent(result.modulePrompt.metadata.id)}`, "_blank", "noopener,noreferrer");
+      }
+
+      toast.success(
+        `Promoted "${result.modulePrompt.metadata.title}" into a reusable skill module${result.extractedInputNames.length > 0 ? ` with ${result.extractedInputNames.length} extracted variable${result.extractedInputNames.length === 1 ? "" : "s"}` : ""}.`,
+      );
+      setPendingPromotion(null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not promote the selected subtree.");
+    } finally {
+      setPromotionSubmitting(false);
+    }
+  }
+
+  async function confirmReuse(): Promise<void> {
+    if (!canonicalPrompt || !pendingReuse || !reusePromptId) {
+      return;
+    }
+
+    setReuseSubmitting(true);
+    try {
+      const record = reusePreviewRecord ?? readStudioPromptDocumentFromLocalCacheSnapshot(reusePromptId) ?? (await readStudioPromptDocumentFromRemote(reusePromptId));
+      if (!record) {
+        throw new Error(`Prompt "${reusePromptId}" could not be loaded.`);
+      }
+
+      const result = replacePromptBlockWithSkillModuleReference({
+        prompt: canonicalPrompt,
+        blockId: pendingReuse,
+        modulePrompt: record.prompt,
+      });
+
+      await writeStudioPromptDocumentToRemote({
+        prompt: result.updatedPrompt,
+        projectId: currentProjectId,
+      });
+
+      hydratePromptDocument(result.updatedPrompt, `reuse://${result.referenceBlockId}`, {
+        projectId: currentProjectId,
+        projectName: currentProjectName,
+      });
+
+      toast.success(
+        `Reused "${record.prompt.metadata.title ?? record.prompt.metadata.id}" as a skill module${result.reusedInputNames.length > 0 ? ` with ${result.reusedInputNames.length} variable${result.reusedInputNames.length === 1 ? "" : "s"}` : ""}.`,
+      );
+      setPendingReuse(null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not reuse the selected skill module.");
+    } finally {
+      setReuseSubmitting(false);
+    }
   }
 
   return (
@@ -621,6 +819,9 @@ export function PromptTreePanel({ onSelectRoot, onSelectBlock }: PromptTreePanel
                       onAddSibling={handleAddSibling}
                       onToggleHidden={toggleBlockHidden}
                       onDelete={setPendingDelete}
+                      onPromote={handlePromoteNode}
+                      onOpenModule={handleOpenModule}
+                      onReuse={handleReuseNode}
                     />
                   ))}
                 </div>
@@ -679,6 +880,167 @@ export function PromptTreePanel({ onSelectRoot, onSelectBlock }: PromptTreePanel
         onCancel={() => setPendingDetachDependency(null)}
         onConfirm={confirmDetachDependency}
       />
+
+      {pendingPromotion && canonicalPrompt ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-background/60 backdrop-blur-sm"
+          onClick={() => {
+            if (!promotionSubmitting) {
+              setPendingPromotion(null);
+            }
+          }}
+        >
+          <div
+            className="w-[28rem] rounded-xl border border-border bg-card p-6 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h3 className="mb-1.5 text-base font-semibold text-foreground">Promote to Reusable Skill</h3>
+            <p className="mb-5 text-sm leading-relaxed text-muted-foreground">
+              Create a reusable skill prompt from this subtree, attach it as a root dependency, and replace the subtree with a reference block.
+            </p>
+            <div className="space-y-2">
+              <label htmlFor="promote-skill-title" className="text-sm font-medium text-foreground">
+                Skill module title
+              </label>
+              <Input
+                id="promote-skill-title"
+                value={promotionTitle}
+                onChange={(event) => setPromotionTitle(event.target.value)}
+                placeholder="Reusable Skill Module"
+                disabled={promotionSubmitting}
+              />
+            </div>
+            <label className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border border-input bg-muted/40"
+                checked={promotionOpenInNewTab}
+                onChange={(event) => setPromotionOpenInNewTab(event.target.checked)}
+                disabled={promotionSubmitting}
+              />
+              Open the promoted skill in a new tab
+            </label>
+            <div className="mt-6 flex gap-3">
+              <button
+                type="button"
+                onClick={() => setPendingPromotion(null)}
+                disabled={promotionSubmitting}
+                className="flex-1 rounded-lg bg-muted px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted/80 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmPromotion()}
+                disabled={promotionSubmitting || promotionTitle.trim().length === 0}
+                className="flex-1 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {promotionSubmitting ? "Promoting..." : "Promote"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {pendingReuse && canonicalPrompt ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-background/60 backdrop-blur-sm"
+          onClick={() => {
+            if (!reuseSubmitting) {
+              setPendingReuse(null);
+            }
+          }}
+        >
+          <div
+            className="w-[30rem] rounded-xl border border-border bg-card p-6 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h3 className="mb-1.5 text-base font-semibold text-foreground">Reuse Existing Skill Module</h3>
+            <p className="mb-5 text-sm leading-relaxed text-muted-foreground">
+              Replace this subtree with a reference to an existing prompt from the current workspace and attach it as a root dependency.
+            </p>
+            <div className="space-y-2">
+              <label htmlFor="reuse-skill-module" className="text-sm font-medium text-foreground">
+                Existing skill prompt
+              </label>
+              <select
+                id="reuse-skill-module"
+                value={reusePromptId}
+                onChange={(event) => setReusePromptId(event.target.value)}
+                disabled={reuseSubmitting || reusablePromptCandidates.length === 0}
+                className="h-9 w-full rounded-md border border-input bg-muted/40 px-3 py-1 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {reusablePromptCandidates.length === 0 ? <option value="">No reusable prompts available</option> : null}
+                {reusablePromptCandidates.map((prompt) => (
+                  <option key={prompt.promptId} value={prompt.promptId}>
+                    {prompt.title} · {prompt.promptId}
+                  </option>
+                ))}
+              </select>
+              <div className="text-xs text-muted-foreground">
+                Only prompts with the same artifact type are shown here.
+              </div>
+            </div>
+            <div className="mt-4 rounded-lg border border-border/70 bg-muted/20 px-4 py-3">
+              {reusePreviewRecord ? (
+                <div className="space-y-2">
+                  <div className="text-sm font-semibold text-foreground">{reusePreviewRecord.prompt.metadata.title ?? reusePreviewRecord.summary.promptId}</div>
+                  <div className="text-[11px] text-muted-foreground">{reusePreviewRecord.summary.promptId}</div>
+                  <div className="text-[11px] text-muted-foreground">
+                    Tags: {reusePreviewTags.length > 0 ? reusePreviewTags.join(", ") : "(none)"}
+                  </div>
+                  <div className="text-[11px] text-muted-foreground">
+                    Variables:{" "}
+                    {reusePreviewRecord.prompt.spec.inputs.length > 0
+                      ? reusePreviewRecord.prompt.spec.inputs.map((input) => input.name).join(", ")
+                      : "(none)"}
+                  </div>
+                  {!reusePreviewIsSkillModule ? (
+                    <div className="text-[11px] text-amber-300">
+                      This prompt is not tagged as `skill_module`. You can still reuse it, but it is not explicitly marked as a reusable module.
+                    </div>
+                  ) : null}
+                  <div>
+                    <a
+                      href={`/studio/prompts/${encodeURIComponent(reusePreviewRecord.summary.promptId)}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 text-[11px] font-medium text-primary underline underline-offset-4"
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" />
+                      Open Prompt
+                    </a>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-xs text-muted-foreground">
+                  {reusePreviewStatus === "loading"
+                    ? "Loading prompt preview..."
+                    : reusePreviewError ?? "Select a reusable prompt to inspect its module interface."}
+                </div>
+              )}
+            </div>
+            <div className="mt-6 flex gap-3">
+              <button
+                type="button"
+                onClick={() => setPendingReuse(null)}
+                disabled={reuseSubmitting}
+                className="flex-1 rounded-lg bg-muted px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted/80 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmReuse()}
+                disabled={reuseSubmitting || reusePromptId.length === 0 || reusablePromptCandidates.length === 0}
+                className="flex-1 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {reuseSubmitting ? "Reusing..." : "Reuse"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

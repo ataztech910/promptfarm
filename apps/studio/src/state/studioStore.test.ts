@@ -867,7 +867,7 @@ test("node llm settings persist across prompt edits and can reset to env default
   store.setNodeLlmSettings({
     baseUrl: "http://localhost:11434/v1",
     apiKey: "",
-    model: "llama3.2",
+    model: "qwen3:14b",
     providerLabel: "ollama_openai",
   });
 
@@ -883,7 +883,7 @@ test("node llm settings persist across prompt edits and can reset to env default
   assert.deepEqual(store.nodeLlmSettings, {
     baseUrl: "http://localhost:11434/v1",
     apiKey: "",
-    model: "llama3.2",
+    model: "qwen3:14b",
     providerLabel: "ollama_openai",
   });
 
@@ -892,7 +892,7 @@ test("node llm settings persist across prompt edits and can reset to env default
   assert.deepEqual(store.nodeLlmSettings, {
     baseUrl: "http://localhost:11434/v1",
     apiKey: "",
-    model: "llama3.2",
+    model: "qwen3:14b",
     providerLabel: "ollama_openai",
   });
 });
@@ -906,7 +906,7 @@ test("node llm presets fill provider defaults for local ollama and openai cloud"
   assert.deepEqual(store.nodeLlmSettings, {
     baseUrl: "http://localhost:11434/v1",
     apiKey: "",
-    model: "llama3.2",
+    model: "qwen3:14b",
     providerLabel: "ollama_openai",
   });
 
@@ -915,7 +915,7 @@ test("node llm presets fill provider defaults for local ollama and openai cloud"
   assert.deepEqual(store.nodeLlmSettings, {
     baseUrl: "https://api.openai.com/v1",
     apiKey: "",
-    model: "llama3.2",
+    model: "qwen3:14b",
     providerLabel: "openai",
   });
 });
@@ -974,7 +974,7 @@ test("node llm model discovery loads local ollama models and keeps them in catal
   assert.equal(store.nodeLlmModelCatalog.status, "success");
   assert.deepEqual(store.nodeLlmModelCatalog.models, ["llama3.2:latest", "mistral:latest"]);
   assert.equal(store.nodeLlmModelCatalog.source, "ollama_tags");
-  assert.equal(store.nodeLlmSettings.model, "llama3.2");
+  assert.equal(store.nodeLlmSettings.model, "qwen3:14b");
 
   store.selectNodeLlmModel("mistral:latest");
   store = useStudioStore.getState();
