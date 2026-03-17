@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   ArrowDown,
   ArrowUp,
@@ -466,7 +467,11 @@ function PromptBlockPickerDialog({
   onClose: () => void;
   onPick: (kind: PromptWorkspaceBlockKind) => void;
 }) {
-  return (
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 p-6 backdrop-blur-sm">
       <button
         type="button"
@@ -517,7 +522,8 @@ function PromptBlockPickerDialog({
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -530,7 +536,11 @@ function PromptBlockDeleteDialog({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  return (
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  return createPortal(
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-background/70 p-6 backdrop-blur-sm">
       <button
         type="button"
@@ -557,7 +567,8 @@ function PromptBlockDeleteDialog({
           </Button>
         </div>
       </Panel>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

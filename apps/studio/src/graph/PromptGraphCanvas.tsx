@@ -15,7 +15,7 @@ import { buildProposalPreviewGraph } from "./adapters/proposalPreviewGraph";
 
 type PromptGraphCanvasProps = {
   layout?: "mind_map" | "org_chart" | "list";
-  onNodeActivate?: () => void;
+  onNodeActivate?: (node: StudioFlowNode) => void;
   onPaneActivate?: () => void;
   onPaneContextMenu?: (position: { x: number; y: number }) => void;
   onNodeContextMenu?: (input: { node: StudioFlowNode; x: number; y: number }) => void;
@@ -101,23 +101,30 @@ export function PromptGraphCanvas({
     const node = rawNode as StudioFlowNode;
     if (node.data.graphState === "proposal") {
       setSelectedProposalNodeId(node.id);
-      onNodeActivate?.();
+      onNodeActivate?.(node);
       return;
     }
 
-    setSelectedNodeId(node.id);
-    onNodeActivate?.();
     if (node.data.kind === "block") {
+      setSelectedNodeId(node.id);
       focusBlock(node.data.properties.__blockId ?? node.data.properties.blockId ?? null);
+      onNodeActivate?.(node);
       return;
     }
     if (node.data.kind === "prompt") {
+      setSelectedNodeId(node.id);
       focusBlock(null);
+      onNodeActivate?.(node);
       return;
     }
     if (node.data.kind === "use_prompt") {
       focusBlock(null);
+      setSelectedNodeId(node.id);
+      onNodeActivate?.(node);
+      return;
     }
+    setSelectedNodeId(node.id);
+    onNodeActivate?.(node);
   };
 
   const onPaneClick = () => {

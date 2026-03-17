@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Boxes, FolderTree, LogOut, ShieldCheck, TerminalSquare, UserRound, X } from "lucide-react";
 import { Panel } from "../components/layout/Panel";
 import { PromptGraphCanvas } from "../graph/PromptGraphCanvas";
+import { resolveEditorSelection } from "../inspector/editorSession";
 import { InspectorPanel } from "../inspector/InspectorPanel";
 import { ModelRegistryPanel } from "../runtime/ModelRegistryPanel";
 import { RuntimePreviewPanel, type RuntimeConsoleState } from "../runtime/RuntimePreviewPanel";
@@ -12,6 +13,7 @@ import { Tabs, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { cn } from "../lib/cn";
 import type { PromptBlockKind } from "@promptfarm/core";
 import type { StudioFlowNode } from "../graph/types";
+import { DependencyPreviewDialog } from "./DependencyPreviewDialog";
 import { PromptTreePanel } from "./PromptTreePanel";
 import { StarterPromptDialog } from "./StarterPromptDialog";
 import { StudioToolbar } from "./StudioToolbar";
@@ -92,6 +94,17 @@ export function StudioShell() {
   const lastConsoleEventCountRef = useRef(0);
 
   const promptSelectionId = canonicalPrompt ? `prompt:${canonicalPrompt.metadata.id}` : null;
+  const currentSelection = useMemo(
+    () =>
+      resolveEditorSelection({
+        canonicalPrompt,
+        nodes,
+        selectedNodeId,
+        focusedBlockId,
+      }),
+    [canonicalPrompt, focusedBlockId, nodes, selectedNodeId],
+  );
+  const dependencySelection = currentSelection?.kind === "use_prompt" ? currentSelection : null;
 
   useEffect(() => {
     if (!canonicalPrompt) {
@@ -103,10 +116,15 @@ export function StudioShell() {
       return;
     }
 
+    if (dependencySelection) {
+      setInspectorOpen(false);
+      return;
+    }
+
     if (selectedNodeId) {
       setInspectorOpen(true);
     }
-  }, [canonicalPrompt, selectedNodeId]);
+  }, [canonicalPrompt, dependencySelection, selectedNodeId]);
 
   useEffect(() => {
     setWorkspaceAuthorTab("prompt");
@@ -139,6 +157,10 @@ export function StudioShell() {
           setCanvasMenu(null);
           return;
         }
+        if (dependencySelection) {
+          setSelectedNodeId(null);
+          return;
+        }
         setInspectorOpen(false);
         return;
       }
@@ -161,7 +183,7 @@ export function StudioShell() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [canvasMenu, commandPaletteOpen]);
+  }, [canvasMenu, commandPaletteOpen, dependencySelection, setSelectedNodeId]);
 
   useEffect(() => {
     if (!canonicalPrompt) {
@@ -223,6 +245,12 @@ export function StudioShell() {
   }
 
   function handleInspectorToggle() {
+    if (dependencySelection) {
+      setSelectedNodeId(null);
+      setInspectorOpen(false);
+      return;
+    }
+
     if (inspectorOpen) {
       closeInspector();
       return;
@@ -395,7 +423,15 @@ export function StudioShell() {
                 <Panel className="h-full overflow-hidden">
                   <PromptGraphCanvas
                     layout={canvasLayout}
-                    onNodeActivate={handleNodeActivate}
+                    onNodeActivate={(node) => {
+                      if (node.data.kind === "use_prompt") {
+                        setCanvasMenu(null);
+                        setCommandPaletteOpen(false);
+                        setInspectorOpen(false);
+                        return;
+                      }
+                      handleNodeActivate();
+                    }}
                     onPaneActivate={handlePaneActivate}
                     onPaneContextMenu={(position) => {
                       setCanvasMenu({
@@ -470,6 +506,14 @@ export function StudioShell() {
           ) : null}
         </main>
       )}
+
+      <DependencyPreviewDialog
+        selection={dependencySelection}
+        onClose={() => {
+          setSelectedNodeId(null);
+          setInspectorOpen(false);
+        }}
+      />
 
       {canvasMenu ? (
         <>

@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Check, Copy, Sparkles } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Button } from "../components/ui/button";
@@ -10,6 +10,12 @@ import { resolveEditorSelection } from "../inspector/editorSession";
 import { findPromptBlockById } from "../model/promptTree";
 import type { Prompt, PromptBlock } from "@promptfarm/core";
 import type { StudioGraphProposal, StudioGraphProposalBlock, StudioNodeResultHistoryEntry } from "../graph/types";
+import {
+  readStudioPromptDocumentFromLocalCacheSnapshot,
+  readStudioPromptDocumentFromRemote,
+  type StudioPromptDocumentRecord,
+} from "../runtime/studioPromptDocumentRemote";
+import { createRenderedPromptPreview } from "../runtime/scopeRuntime";
 
 function copyText(text: string) {
   void navigator.clipboard.writeText(text);
@@ -151,6 +157,9 @@ export function NodeWorkspaceResultsPanel() {
   const restoreNodeResultHistoryEntry = useStudioStore((s) => s.restoreNodeResultHistoryEntry);
   const selectedScopeOutput = selectedScopePromptPreview ? latestScopeOutputs[selectedScopePromptPreview.scope.scopeRef] ?? null : null;
   const [copied, setCopied] = useState(false);
+  const [dependencyRecord, setDependencyRecord] = useState<StudioPromptDocumentRecord | null>(null);
+  const [dependencyPreviewStatus, setDependencyPreviewStatus] = useState<"idle" | "loading" | "error">("idle");
+  const [dependencyPreviewError, setDependencyPreviewError] = useState<string | null>(null);
 
   const selection = useMemo(
     () =>
@@ -208,14 +217,80 @@ export function NodeWorkspaceResultsPanel() {
   );
   const latestNodeStructureError = latestNodeStructureEvent?.status === "error" ? latestNodeStructureEvent : null;
   const currentNodeHistory = runtimeNodeId ? nodeResultHistory[runtimeNodeId] ?? [] : [];
-  const promptText = selectedScopePromptPreview?.renderedText ?? liveCompiled?.text ?? "";
-  const hasPromptPreview = Boolean(selectedScopePromptPreview ?? liveCompiled);
+  const dependencyPromptId = selection?.kind === "use_prompt" ? selection.prompt.spec.use[selection.index]?.prompt ?? null : null;
+  const dependencyPromptPreview = useMemo(
+    () =>
+      dependencyRecord
+        ? createRenderedPromptPreview(
+            dependencyRecord.prompt,
+            { mode: "root" },
+            `${dependencyRecord.summary.promptId}:${dependencyRecord.summary.updatedAt}`,
+          )
+        : null,
+    [dependencyRecord],
+  );
+  const promptText =
+    selection?.kind === "use_prompt"
+      ? dependencyPromptPreview?.renderedText ?? ""
+      : selectedScopePromptPreview?.renderedText ?? liveCompiled?.text ?? "";
+  const hasPromptPreview =
+    selection?.kind === "use_prompt" ? Boolean(dependencyPromptPreview) : Boolean(selectedScopePromptPreview ?? liveCompiled);
   const structureSourceRef = selection && selection.kind !== "use_prompt" ? selection.ref : null;
   const canonicalChildBlocks = useMemo(() => {
     if (!selection || selection.kind === "use_prompt") {
       return [] as PromptBlock[];
     }
     return selection.kind === "prompt" ? selection.prompt.spec.blocks : selection.block.children;
+  }, [selection]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (selection?.kind !== "use_prompt") {
+      setDependencyRecord(null);
+      setDependencyPreviewStatus("idle");
+      setDependencyPreviewError(null);
+      return;
+    }
+
+    const promptId = selection.prompt.spec.use[selection.index]?.prompt ?? null;
+    if (!promptId) {
+      setDependencyRecord(null);
+      setDependencyPreviewStatus("error");
+      setDependencyPreviewError("Dependency prompt id is missing.");
+      return;
+    }
+
+    const localRecord = readStudioPromptDocumentFromLocalCacheSnapshot(promptId);
+    setDependencyRecord(localRecord);
+    setDependencyPreviewStatus(localRecord ? "idle" : "loading");
+    setDependencyPreviewError(null);
+
+    void readStudioPromptDocumentFromRemote(promptId)
+      .then((record) => {
+        if (cancelled) {
+          return;
+        }
+        setDependencyRecord(record);
+        if (!record) {
+          setDependencyPreviewStatus("error");
+          setDependencyPreviewError(`Dependency prompt "${promptId}" could not be loaded.`);
+          return;
+        }
+        setDependencyPreviewStatus("idle");
+        setDependencyPreviewError(null);
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+        setDependencyPreviewStatus("error");
+        setDependencyPreviewError(error instanceof Error ? error.message : String(error));
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [selection]);
 
   function handleCopy() {
@@ -250,7 +325,14 @@ export function NodeWorkspaceResultsPanel() {
               <ScrollArea className="h-full px-5 py-5">
                 {hasPromptPreview ? (
                   <div className="space-y-4">
-                    {selectedScopePromptPreview ? (
+                    {selection?.kind === "use_prompt" && dependencyPromptId ? (
+                      <div className="rounded-xl border border-border/70 bg-muted/15 p-4 text-xs text-muted-foreground">
+                        <div>Dependency: {dependencyRecord?.summary.title ?? dependencyPromptId}</div>
+                        <div>Prompt ID: {dependencyPromptId}</div>
+                        <div>Artifact: {dependencyRecord?.summary.artifactType ?? "(unknown)"}</div>
+                        <div>Status: {dependencyPreviewStatus === "loading" ? "loading" : dependencyPreviewError ? "error" : "ready"}</div>
+                      </div>
+                    ) : selectedScopePromptPreview ? (
                       <div className="rounded-xl border border-border/70 bg-muted/15 p-4 text-xs text-muted-foreground">
                         <div>Scope: {selectedScopePromptPreview.scope.label}</div>
                         <div>Inherited messages: {selectedScopePromptPreview.inheritedMessageCount}</div>
@@ -262,10 +344,24 @@ export function NodeWorkspaceResultsPanel() {
                       <pre className="whitespace-pre-wrap text-[15px] leading-9 text-foreground/95">{promptText}</pre>
                     ) : (
                       <div className="flex min-h-[18rem] items-center justify-center text-sm text-muted-foreground">
-                        Add prompt blocks to inspect the compiled output.
+                        {selection?.kind === "use_prompt" ? "Dependency prompt preview is unavailable." : "Add prompt blocks to inspect the compiled output."}
                       </div>
                     )}
-                    {selectedScopePromptPreview && selectedScopePromptPreview.issues.length > 0 ? (
+                    {selection?.kind === "use_prompt" && dependencyPreviewError ? (
+                      <div className="space-y-2">
+                        <p className="text-sm text-destructive">{dependencyPreviewError}</p>
+                      </div>
+                    ) : null}
+                    {selection?.kind === "use_prompt" && dependencyPromptPreview && dependencyPromptPreview.issues.length > 0 ? (
+                      <div className="space-y-2">
+                        {dependencyPromptPreview.issues.map((issue, index) => (
+                          <p key={`${issue.filepath}:${index}`} className="text-sm text-destructive">
+                            {issue.message}
+                          </p>
+                        ))}
+                      </div>
+                    ) : null}
+                    {selection?.kind !== "use_prompt" && selectedScopePromptPreview && selectedScopePromptPreview.issues.length > 0 ? (
                       <div className="space-y-2">
                         {selectedScopePromptPreview.issues.map((issue, index) => (
                           <p key={`${issue.filepath}:${index}`} className="text-sm text-destructive">
@@ -277,7 +373,11 @@ export function NodeWorkspaceResultsPanel() {
                   </div>
                 ) : (
                   <div className="flex min-h-[18rem] items-center justify-center text-sm text-muted-foreground">
-                    Add prompt blocks to inspect the compiled output.
+                    {selection?.kind === "use_prompt"
+                      ? dependencyPreviewStatus === "loading"
+                        ? "Loading dependency prompt..."
+                        : "Dependency prompt preview is unavailable."
+                      : "Add prompt blocks to inspect the compiled output."}
                   </div>
                 )}
               </ScrollArea>
@@ -323,7 +423,9 @@ export function NodeWorkspaceResultsPanel() {
                   </div>
                 ) : (
                   <div className="flex min-h-[18rem] items-center justify-center text-sm text-muted-foreground">
-                    Press generate output to create a result for this scope.
+                    {selection?.kind === "use_prompt"
+                      ? "Use Prompt dependencies are composition inputs. Select the root prompt or a block to generate output."
+                      : "Press generate output to create a result for this scope."}
                   </div>
                 )}
               </ScrollArea>
@@ -596,13 +698,13 @@ export function NodeWorkspaceResultsPanel() {
           <Button
             type="button"
             className="ml-auto h-12 min-w-[220px] rounded-xl bg-sky-500 text-[15px] font-semibold text-slate-950 hover:bg-sky-400"
-            disabled={!selectedNodeId || runtimeState?.status === "running"}
+            disabled={!selectedNodeId || selection?.kind === "use_prompt" || runtimeState?.status === "running"}
             onClick={() => runNode(selectedNodeId!)}
           >
             <Sparkles className="h-4 w-4" />
             Generate Output
           </Button>
-          {runtimeState?.status === "running" ? (
+          {runtimeState?.status === "running" && selection?.kind !== "use_prompt" ? (
             <Button type="button" variant="outline" size="sm" onClick={() => stopNode(selectedNodeId!)} disabled={Boolean(runtimeState.cancelRequestedAt)}>
               {runtimeState.cancelRequestedAt ? "Stopping" : "Stop"}
             </Button>
