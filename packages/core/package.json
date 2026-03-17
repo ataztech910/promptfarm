@@ -24,7 +24,7 @@
     "test:evaluation": "node --import tsx --test src/core/evaluation/engine.test.ts",
     "test:blueprint": "node --import tsx --test src/core/blueprint/generator.test.ts",
     "test:builders": "node --import tsx --test src/core/builders/builders.test.ts",
-    "test:nodeExecution": "node --import tsx --test src/core/nodeExecution.test.ts src/core/nodeExecutionRepository.test.ts"
+    "test:nodeExecution": "node --import tsx --test src/core/nodeExecution.test.ts src/core/nodeExecutionRepository.test.ts src/core/nodeExecutionSqliteRepository.test.ts src/core/nodeExecutionRepositoryStrategy.test.ts src/llm/openaiCompatible.test.ts src/llm/scopedExecution.test.ts"
   },
   "dependencies": {
     "fast-glob": "^3.3.2",

@@ -1,5 +1,6 @@
 import { ArtifactType, PromptSchema, type Prompt } from "@promptfarm/core";
 import { createPrimaryBuildTarget } from "../model/artifactBuildTargets";
+import { coreTaskPromptForArtifact, rolePromptForArtifact } from "../model/artifactPromptScaffold";
 import type { StudioRuntimeAction, StudioRuntimeExecutionStatus, StudioRuntimePreview } from "../graph/types";
 
 export type StarterArtifactChoice = ArtifactType;
@@ -41,6 +42,8 @@ export type PaletteGroup = {
   }>;
 };
 
+let starterPromptSequence = 0;
+
 function titleCaseArtifact(artifactType: ArtifactType): string {
   if (artifactType === ArtifactType.BookText) return "Book";
   if (artifactType === ArtifactType.Instruction) return "Instruction";
@@ -49,25 +52,17 @@ function titleCaseArtifact(artifactType: ArtifactType): string {
   return "Code";
 }
 
-function starterSystemMessageForArtifact(artifactType: ArtifactType): string {
-  if (artifactType === ArtifactType.Code) {
-    return "You design concise, production-ready code artifacts with explicit structure.";
-  }
-  if (artifactType === ArtifactType.BookText) {
-    return "You write structured book text with clear sections and factual flow.";
-  }
-  if (artifactType === ArtifactType.Story) {
-    return "You write coherent narrative artifacts with clear beats and tone.";
-  }
-  if (artifactType === ArtifactType.Course) {
-    return "You design practical course artifacts with lessons and progression.";
-  }
-  return "You produce precise step-by-step instruction artifacts.";
+function createStarterPromptId(artifactType: ArtifactType): string {
+  starterPromptSequence += 1;
+  const timePart = Date.now().toString(36);
+  const sequencePart = starterPromptSequence.toString(36);
+  return `new_${artifactType}_prompt_${timePart}_${sequencePart}`;
 }
 
 export function createStarterPrompt(artifactType: StarterArtifactChoice): Prompt {
   const label = titleCaseArtifact(artifactType);
-  const promptId = `new_${artifactType}_prompt`;
+  const promptId = createStarterPromptId(artifactType);
+  const coreTask = coreTaskPromptForArtifact(artifactType);
 
   return PromptSchema.parse({
     apiVersion: "promptfarm/v1",
@@ -76,7 +71,7 @@ export function createStarterPrompt(artifactType: StarterArtifactChoice): Prompt
       id: promptId,
       version: "1.0.0",
       title: `New ${label} Prompt`,
-      description: `Starter ${artifactType} pipeline`,
+      description: coreTask,
       tags: ["starter"],
     },
     spec: {
@@ -87,7 +82,11 @@ export function createStarterPrompt(artifactType: StarterArtifactChoice): Prompt
       messages: [
         {
           role: "system",
-          content: starterSystemMessageForArtifact(artifactType),
+          content: rolePromptForArtifact(artifactType),
+        },
+        {
+          role: "user",
+          content: coreTask,
         },
       ],
       use: [],

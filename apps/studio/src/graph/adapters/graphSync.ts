@@ -10,6 +10,8 @@ import {
   addPromptBlock,
   findPromptBlockById,
   movePromptBlock,
+  relocatePromptBlock,
+  reparentPromptBlock,
   removePromptBlock,
 } from "../../model/promptTree";
 import type { BlockEditIntent, GraphAddableNodeKind, GraphEditIntent, StudioFlowNode, StudioGraph } from "../types";
@@ -22,6 +24,31 @@ export type GraphSyncIssue = {
 export type GraphToCanonicalSyncResult =
   | { supported: true; prompt: Prompt }
   | { supported: false; issues: GraphSyncIssue[] };
+
+function formatLabel(value: string): string {
+  return value.replaceAll("_", " ");
+}
+
+function formatValidationIssue(path: (string | number)[], message: string): string {
+  const hierarchyMatch = message.match(
+    /^Block kind "([^"]+)" is not allowed under ([^ ]+) for artifact type "([^"]+)". Allowed children: (.+)\.$/,
+  );
+
+  if (hierarchyMatch) {
+    const [, childKind, parentKind, artifactType, allowedChildren] = hierarchyMatch;
+    const parentLabel = parentKind === "root" ? "the root level" : `a ${formatLabel(parentKind)}`;
+    return `You can't place a ${formatLabel(childKind)} inside ${parentLabel} for ${formatLabel(artifactType)}. Allowed child types here: ${allowedChildren
+      .split(",")
+      .map((entry) => formatLabel(entry.trim()))
+      .join(", ")}.`;
+  }
+
+  if (path.length === 0) {
+    return message;
+  }
+
+  return `Invalid value at ${path.join(" > ")}: ${message}`;
+}
 
 function clonePrompt(prompt: Prompt): Prompt {
   return JSON.parse(JSON.stringify(prompt)) as Prompt;
@@ -478,6 +505,18 @@ function applyBlockIntent(prompt: Prompt, intent: BlockEditIntent): GraphSyncIss
       : [{ nodeId: intent.blockId, message: `Prompt block ${intent.blockId} cannot move ${intent.direction}.` }];
   }
 
+  if (intent.type === "block.relocate") {
+    return relocatePromptBlock(prompt, intent.blockId, intent.targetParentId, intent.targetIndex)
+      ? []
+      : [{ nodeId: intent.blockId, message: `Prompt block ${intent.blockId} cannot relocate.` }];
+  }
+
+  if (intent.type === "block.reparent") {
+    return reparentPromptBlock(prompt, intent.blockId, intent.targetBlockId)
+      ? []
+      : [{ nodeId: intent.blockId, message: `Prompt block ${intent.blockId} cannot move into ${intent.targetBlockId ?? "root"}.` }];
+  }
+
   return [];
 }
 
@@ -487,7 +526,7 @@ function validatePrompt(prompt: Prompt): GraphToCanonicalSyncResult {
     return {
       supported: false,
       issues: validated.error.issues.map((issue) => ({
-        message: `${issue.path.join(".") || "(root)"}: ${issue.message}`,
+        message: formatValidationIssue(issue.path, issue.message),
       })),
     };
   }

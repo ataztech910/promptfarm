@@ -11,3 +11,6 @@ export * from "./core/writePromptFiles.js";
 export * from "./core/context/findFiles.js";
 export * from "./core/context/gitContext.js";
 export * from "./core/context/formatContext.js";
+export * from "./core/databaseConfig.js";
+export * from "./core/nodeExecutionSqliteRepository.js";
+export * from "./core/nodeExecutionRepositoryStrategy.js";

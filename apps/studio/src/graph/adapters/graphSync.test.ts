@@ -273,3 +273,188 @@ test("canonical graph regeneration remains stable after successful patch", () =>
   const graphB = canonicalPromptToGraph(result.prompt);
   assert.deepEqual(graphA, graphB);
 });
+
+test("applyGraphIntentToPrompt can reparent a block into another block", () => {
+  const prompt = PromptSchema.parse({
+    apiVersion: "promptfarm/v1",
+    kind: "Prompt",
+    metadata: {
+      id: "tree_reparent",
+      version: "1.0.0",
+    },
+    spec: {
+      artifact: {
+        type: "book_text",
+      },
+      messages: [{ role: "system", content: "Root" }],
+      use: [],
+      buildTargets: [],
+      blocks: [
+        {
+          id: "chapter_1",
+          kind: "chapter",
+          title: "Chapter 1",
+          messages: [],
+          children: [
+            {
+              id: "section_1",
+              kind: "section",
+              title: "Section 1",
+              messages: [],
+              children: [
+                {
+                  id: "generic_block_1",
+                  kind: "generic_block",
+                  title: "Leaf 1",
+                  messages: [],
+                  children: [],
+                },
+                {
+                  id: "generic_block_2",
+                  kind: "generic_block",
+                  title: "Leaf 2",
+                  messages: [],
+                  children: [],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  });
+  const graph = canonicalPromptToGraph(prompt);
+
+  const result = applyGraphIntentToPrompt(prompt, graph, {
+    type: "block.reparent",
+    blockId: "generic_block_1",
+    targetBlockId: "generic_block_2",
+  });
+
+  assert.equal(result.supported, true);
+  if (!result.supported) return;
+
+  const parent = result.prompt.spec.blocks[0]?.children[0];
+  assert.deepEqual(parent?.children.map((block) => block.id), ["generic_block_2"]);
+  assert.deepEqual(parent?.children[0]?.children.map((block) => block.id), ["generic_block_1"]);
+});
+
+test("applyGraphIntentToPrompt can relocate a block within the same branch", () => {
+  const prompt = PromptSchema.parse({
+    apiVersion: "promptfarm/v1",
+    kind: "Prompt",
+    metadata: {
+      id: "tree_relocate",
+      version: "1.0.0",
+    },
+    spec: {
+      artifact: {
+        type: "book_text",
+      },
+      messages: [{ role: "system", content: "Root" }],
+      use: [],
+      buildTargets: [],
+      blocks: [
+        {
+          id: "chapter_1",
+          kind: "chapter",
+          title: "Chapter 1",
+          messages: [],
+          children: [
+            {
+              id: "section_1",
+              kind: "section",
+              title: "Section 1",
+              messages: [],
+              children: [],
+            },
+            {
+              id: "section_2",
+              kind: "section",
+              title: "Section 2",
+              messages: [],
+              children: [],
+            },
+          ],
+        },
+      ],
+    },
+  });
+  const graph = canonicalPromptToGraph(prompt);
+
+  const result = applyGraphIntentToPrompt(prompt, graph, {
+    type: "block.relocate",
+    blockId: "section_2",
+    targetParentId: "chapter_1",
+    targetIndex: 0,
+  });
+
+  assert.equal(result.supported, true);
+  if (!result.supported) return;
+
+  assert.deepEqual(result.prompt.spec.blocks[0]?.children.map((block) => block.id), ["section_2", "section_1"]);
+});
+
+test("applyGraphIntentToPrompt can relocate a block into another parent at a child index", () => {
+  const prompt = PromptSchema.parse({
+    apiVersion: "promptfarm/v1",
+    kind: "Prompt",
+    metadata: {
+      id: "tree_relocate_nested",
+      version: "1.0.0",
+    },
+    spec: {
+      artifact: {
+        type: "code",
+      },
+      messages: [{ role: "system", content: "Root" }],
+      use: [],
+      buildTargets: [],
+      blocks: [
+        {
+          id: "generic_block_1",
+          kind: "generic_block",
+          title: "Block 1",
+          messages: [],
+          children: [
+            {
+              id: "child_1",
+              kind: "generic_block",
+              title: "Child 1",
+              messages: [],
+              children: [],
+            },
+            {
+              id: "child_2",
+              kind: "generic_block",
+              title: "Child 2",
+              messages: [],
+              children: [],
+            },
+          ],
+        },
+        {
+          id: "generic_block_2",
+          kind: "generic_block",
+          title: "Block 2",
+          messages: [],
+          children: [],
+        },
+      ],
+    },
+  });
+  const graph = canonicalPromptToGraph(prompt);
+
+  const result = applyGraphIntentToPrompt(prompt, graph, {
+    type: "block.relocate",
+    blockId: "generic_block_2",
+    targetParentId: "generic_block_1",
+    targetIndex: 1,
+  });
+
+  assert.equal(result.supported, true);
+  if (!result.supported) return;
+
+  assert.deepEqual(result.prompt.spec.blocks.map((block) => block.id), ["generic_block_1"]);
+  assert.deepEqual(result.prompt.spec.blocks[0]?.children.map((block) => block.id), ["child_1", "generic_block_2", "child_2"]);
+});

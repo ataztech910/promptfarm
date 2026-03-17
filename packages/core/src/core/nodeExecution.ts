@@ -4,6 +4,7 @@ import type { TemplateVars } from "./template.js";
 import {
   type InputDefinition,
   type MessageTemplate,
+  type NodeExecutionMode,
   type Prompt,
   type PromptBlock,
   type NodeExecutionRecord,
@@ -24,6 +25,7 @@ export function createNodeExecutionRecord(input: {
   promptId: string;
   nodeId: string;
   scope: NodeExecutionScope;
+  mode?: NodeExecutionMode;
   sourceSnapshotHash: string;
   startedAt?: Date;
   provider?: string;
@@ -34,6 +36,7 @@ export function createNodeExecutionRecord(input: {
     promptId: input.promptId,
     nodeId: input.nodeId,
     scope: input.scope,
+    ...(input.mode !== undefined ? { mode: input.mode } : {}),
     status: "running",
     sourceSnapshotHash: input.sourceSnapshotHash,
     startedAt: input.startedAt ?? new Date(),
@@ -75,11 +78,19 @@ export function completeNodeExecutionRecord(
     | {
         status: "success";
         output: string;
+        provider?: string;
+        model?: string;
+        finishReason?: string;
+        executionTimeMs?: number;
       }
     | {
         status: "error";
         errorMessage: string;
         output?: string;
+        provider?: string;
+        model?: string;
+        finishReason?: string;
+        executionTimeMs?: number;
       },
   completedAt: Date = new Date(),
 ): NodeExecutionRecord {
@@ -89,6 +100,10 @@ export function completeNodeExecutionRecord(
       status: "success",
       output: result.output,
       completedAt,
+      ...(result.provider !== undefined ? { provider: result.provider } : {}),
+      ...(result.model !== undefined ? { model: result.model } : {}),
+      ...(result.finishReason !== undefined ? { finishReason: result.finishReason } : {}),
+      ...(result.executionTimeMs !== undefined ? { executionTimeMs: result.executionTimeMs } : {}),
     };
   }
 
@@ -98,6 +113,10 @@ export function completeNodeExecutionRecord(
     completedAt,
     errorMessage: result.errorMessage,
     ...(result.output !== undefined ? { output: result.output } : {}),
+    ...(result.provider !== undefined ? { provider: result.provider } : {}),
+    ...(result.model !== undefined ? { model: result.model } : {}),
+    ...(result.finishReason !== undefined ? { finishReason: result.finishReason } : {}),
+    ...(result.executionTimeMs !== undefined ? { executionTimeMs: result.executionTimeMs } : {}),
   };
 }
 

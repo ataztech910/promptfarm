@@ -16,6 +16,8 @@ import { cmdDoctor } from "./commands/doctor.js";
 import { cmdEvaluate } from "./commands/evaluate.js";
 import { cmdBlueprint } from "./commands/blueprint.js";
 import { cmdResolve } from "./commands/resolve.js";
+import { cmdServe } from "./commands/serve.js";
+import { cmdAuthResetOwner } from "./commands/authResetOwner.js";
 
 
 const program = new Command();
@@ -43,5 +45,7 @@ program.addCommand(cmdPaths());
 program.addCommand(cmdContext());
 program.addCommand(cmdReset());
 program.addCommand(cmdDoctor());
+program.addCommand(cmdServe());
+program.addCommand(cmdAuthResetOwner());
 
 program.parse(process.argv);

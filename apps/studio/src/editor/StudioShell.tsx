@@ -1,25 +1,25 @@
-import { useEffect, useMemo, useState } from "react";
-import { Braces, FolderTree, LayoutGrid, Sparkles, TerminalSquare, WandSparkles, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Boxes, FolderTree, LogOut, ShieldCheck, TerminalSquare, UserRound, X } from "lucide-react";
 import { Panel } from "../components/layout/Panel";
 import { PromptGraphCanvas } from "../graph/PromptGraphCanvas";
-import { canonicalPromptToStructureGraph } from "../graph/adapters/canonicalToStructureGraph";
 import { InspectorPanel } from "../inspector/InspectorPanel";
-import { NodePalette } from "../nodes/NodePalette";
+import { ModelRegistryPanel } from "../runtime/ModelRegistryPanel";
 import { RuntimePreviewPanel, type RuntimeConsoleState } from "../runtime/RuntimePreviewPanel";
 import { useStudioStore } from "../state/studioStore";
 import { findPromptBlockReference, getSiblingBlockKinds, getSuggestedBlockKinds } from "../model/promptTree";
 import { Button } from "../components/ui/button";
+import { Tabs, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { cn } from "../lib/cn";
 import type { PromptBlockKind } from "@promptfarm/core";
 import type { StudioFlowNode } from "../graph/types";
-import { FlowGuidePanel } from "./FlowGuidePanel";
 import { PromptTreePanel } from "./PromptTreePanel";
 import { StarterPromptDialog } from "./StarterPromptDialog";
 import { StudioToolbar } from "./StudioToolbar";
-import { YamlImportPanel } from "./YamlImportPanel";
+import { useStudioAuth } from "../auth/StudioAuthProvider";
+import { NodeWorkspaceResultsPanel } from "./NodeWorkspaceResultsPanel";
 
-type LeftPanelMode = "tree" | "advanced";
-type AdvancedToolTab = "flow" | "palette" | "yaml";
+type LeftPanelMode = "tree" | "models" | "account";
+type WorkspaceAuthorTab = "prompt" | "config";
 
 type CanvasMenuState =
   | null
@@ -30,43 +30,36 @@ function formatBlockKind(value: string): string {
   return value.replaceAll("_", " ");
 }
 
-function AdvancedToolsPanel({
-  activeTab,
-  onSelectTab,
-  onSelectRootPrompt,
+function LocalAccountPanel({
+  email,
+  onRequestLogout,
 }: {
-  activeTab: AdvancedToolTab;
-  onSelectTab: (tab: AdvancedToolTab) => void;
-  onSelectRootPrompt: () => void;
+  email: string;
+  onRequestLogout: () => void;
 }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="border-b border-border px-3 py-2">
-        <h2 className="text-sm font-semibold">Advanced Tools</h2>
-        <p className="mt-1 text-xs text-muted-foreground">Secondary authoring tools. Hidden by default to keep structure-first navigation focused.</p>
+        <h2 className="text-sm font-semibold">Account</h2>
+        <p className="mt-1 text-xs text-muted-foreground">Local self-hosted owner account for the current PromptFarm backend.</p>
       </div>
 
-      <div className="border-b border-border px-2 py-2">
-        <div className="flex flex-wrap gap-2">
-          <Button variant={activeTab === "flow" ? "secondary" : "outline"} size="sm" onClick={() => onSelectTab("flow")}>
-            <Sparkles className="h-3.5 w-3.5" />
-            Flow
-          </Button>
-          <Button variant={activeTab === "palette" ? "secondary" : "outline"} size="sm" onClick={() => onSelectTab("palette")}>
-            <LayoutGrid className="h-3.5 w-3.5" />
-            Palette
-          </Button>
-          <Button variant={activeTab === "yaml" ? "secondary" : "outline"} size="sm" onClick={() => onSelectTab("yaml")}>
-            <Braces className="h-3.5 w-3.5" />
-            YAML
+      <div className="min-h-0 flex-1 overflow-auto p-4">
+        <div className="rounded-lg border border-border/70 bg-muted/20 px-4 py-4">
+          <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+            <ShieldCheck className="h-3.5 w-3.5 text-emerald-300" />
+            Authorized
+          </div>
+          <div className="mt-3 text-sm font-medium text-foreground">Self-hosted owner</div>
+          <div className="mt-1 break-all text-xs text-muted-foreground">{email}</div>
+          <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
+            User settings can live here later. For now this section only exposes the authenticated owner state and logout action.
+          </p>
+          <Button variant="outline" size="sm" className="mt-4 w-full justify-center" onClick={onRequestLogout}>
+            <LogOut className="h-3.5 w-3.5" />
+            Logout
           </Button>
         </div>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-hidden">
-        {activeTab === "flow" ? <FlowGuidePanel onSelectRootPrompt={onSelectRootPrompt} /> : null}
-        {activeTab === "palette" ? <NodePalette /> : null}
-        {activeTab === "yaml" ? <YamlImportPanel /> : null}
       </div>
     </div>
   );
@@ -74,20 +67,29 @@ function AdvancedToolsPanel({
 
 export function StudioShell() {
   const canonicalPrompt = useStudioStore((s) => s.canonicalPrompt);
+  const nodes = useStudioStore((s) => s.nodes);
   const selectedNodeId = useStudioStore((s) => s.selectedNodeId);
   const focusedBlockId = useStudioStore((s) => s.focusedBlockId);
+  const canvasLayout = useStudioStore((s) => s.canvasLayout);
   const syncIssues = useStudioStore((s) => s.syncIssues);
   const runtimeIssues = useStudioStore((s) => s.runtimePreview.issues.length);
+  const consoleEvents = useStudioStore((s) => s.consoleEvents);
+  const hiddenDependencyPromptIds = useStudioStore((s) => s.hiddenDependencyPromptIds);
   const applyGraphIntent = useStudioStore((s) => s.applyGraphIntent);
   const focusBlock = useStudioStore((s) => s.focusBlock);
+  const setCanvasLayout = useStudioStore((s) => s.setCanvasLayout);
   const setSelectedNodeId = useStudioStore((s) => s.setSelectedNodeId);
+  const refreshSelectedScopePromptPreview = useStudioStore((s) => s.refreshSelectedScopePromptPreview);
+  const recoverRemoteRuntimeForCurrentPrompt = useStudioStore((s) => s.recoverRemoteRuntimeForCurrentPrompt);
+  const { logOut, user } = useStudioAuth();
   const [leftPanelMode, setLeftPanelMode] = useState<LeftPanelMode>("tree");
-  const [advancedToolTab, setAdvancedToolTab] = useState<AdvancedToolTab>("flow");
-  const [viewMode, setViewMode] = useState<"focus" | "structure">("focus");
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [consoleState, setConsoleState] = useState<RuntimeConsoleState>("hidden");
   const [canvasMenu, setCanvasMenu] = useState<CanvasMenuState>(null);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [logoutDialogOpen, setLogoutDialogOpen] = useState(false);
+  const [workspaceAuthorTab, setWorkspaceAuthorTab] = useState<WorkspaceAuthorTab>("prompt");
+  const lastConsoleEventCountRef = useRef(0);
 
   const promptSelectionId = canonicalPrompt ? `prompt:${canonicalPrompt.metadata.id}` : null;
 
@@ -105,6 +107,26 @@ export function StudioShell() {
       setInspectorOpen(true);
     }
   }, [canonicalPrompt, selectedNodeId]);
+
+  useEffect(() => {
+    setWorkspaceAuthorTab("prompt");
+  }, [selectedNodeId, focusedBlockId, canonicalPrompt?.metadata.id]);
+
+  const dependencySignature = useMemo(
+    () => canonicalPrompt?.spec.use.map((dep) => dep.prompt).join("|") ?? "",
+    [canonicalPrompt],
+  );
+  const hiddenDependencySignature = useMemo(
+    () => hiddenDependencyPromptIds.join("|"),
+    [hiddenDependencyPromptIds],
+  );
+
+  useEffect(() => {
+    if (!canonicalPrompt) {
+      return;
+    }
+    refreshSelectedScopePromptPreview();
+  }, [canonicalPrompt?.metadata.id, dependencySignature, hiddenDependencySignature, refreshSelectedScopePromptPreview]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -141,13 +163,35 @@ export function StudioShell() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [canvasMenu, commandPaletteOpen]);
 
+  useEffect(() => {
+    if (!canonicalPrompt) {
+      lastConsoleEventCountRef.current = 0;
+      return;
+    }
+
+    const previousCount = lastConsoleEventCountRef.current;
+    const currentCount = consoleEvents.length;
+    lastConsoleEventCountRef.current = currentCount;
+
+    if (currentCount > previousCount && consoleState === "hidden") {
+      setConsoleState("compact");
+    }
+  }, [canonicalPrompt, consoleEvents.length, consoleState]);
+
+  useEffect(() => {
+    if (!canonicalPrompt) {
+      return;
+    }
+    void recoverRemoteRuntimeForCurrentPrompt();
+  }, [canonicalPrompt?.metadata.id, recoverRemoteRuntimeForCurrentPrompt]);
+
   const rootSuggestedKinds = useMemo(
     () => (canonicalPrompt ? getSuggestedBlockKinds(canonicalPrompt, focusedBlockId) : []),
     [canonicalPrompt, focusedBlockId],
   );
-  const structureGraph = useMemo(
-    () => (canonicalPrompt ? canonicalPromptToStructureGraph(canonicalPrompt) : null),
-    [canonicalPrompt],
+  const selectedWorkspaceNode = useMemo(
+    () => (selectedNodeId ? nodes.find((node) => node.id === selectedNodeId) ?? null : null),
+    [nodes, selectedNodeId],
   );
 
   const blockMenuKinds = useMemo(() => {
@@ -170,15 +214,8 @@ export function StudioShell() {
     setCommandPaletteOpen(false);
   }
 
-  function handleViewModeChange(mode: "focus" | "structure") {
-    if (mode === "focus") {
-      if (selectedNodeId?.startsWith("block:")) {
-        focusBlock(selectedNodeId.replace("block:", ""));
-      } else if (selectedNodeId?.startsWith("prompt:") || selectedNodeId?.startsWith("use_prompt:")) {
-        focusBlock(null);
-      }
-    }
-    setViewMode(mode);
+  function handleLayoutChange(layout: "mind_map" | "org_chart" | "list") {
+    setCanvasLayout(layout);
   }
 
   function closeInspector() {
@@ -266,14 +303,19 @@ export function StudioShell() {
   }
 
   function renderSidebarContent() {
-    if (leftPanelMode === "advanced") {
-      return (
-        <AdvancedToolsPanel
-          activeTab={advancedToolTab}
-          onSelectTab={setAdvancedToolTab}
-          onSelectRootPrompt={openRootInspector}
-        />
-      );
+    if (leftPanelMode === "models") {
+      return <ModelRegistryPanel />;
+    }
+
+    if (leftPanelMode === "account") {
+      if (!user) {
+        return (
+          <div className="flex h-full min-h-0 items-center justify-center p-6 text-sm text-muted-foreground">
+            No authenticated owner session.
+          </div>
+        );
+      }
+      return <LocalAccountPanel email={user.email} onRequestLogout={() => setLogoutDialogOpen(true)} />;
     }
 
     return <PromptTreePanel onSelectRoot={openRootInspector} onSelectBlock={handleTreeBlockSelect} />;
@@ -284,8 +326,8 @@ export function StudioShell() {
       <StudioToolbar
         inspectorOpen={inspectorOpen}
         consoleState={consoleState}
-        viewMode={viewMode}
-        onViewModeChange={handleViewModeChange}
+        layout={canvasLayout}
+        onLayoutChange={handleLayoutChange}
         onToggleInspector={handleInspectorToggle}
         onCycleConsole={() =>
           setConsoleState((current) => {
@@ -301,8 +343,8 @@ export function StudioShell() {
           <StarterPromptDialog />
         </main>
       ) : (
-        <main className="flex min-h-0 flex-1 overflow-hidden p-3 pt-0">
-          <div className="flex min-h-0 flex-1 overflow-hidden rounded-b-xl border border-t-0 border-border bg-card/30">
+        <main className="relative flex min-h-0 flex-1 overflow-hidden p-3 pt-0">
+          <div className="relative flex min-h-0 flex-1 overflow-hidden rounded-b-xl border border-t-0 border-border bg-card/30">
             <div className="flex shrink-0 border-r border-border bg-card/70">
               <div className="flex w-14 flex-col items-center gap-2 px-2 py-3">
                 <Button
@@ -315,20 +357,25 @@ export function StudioShell() {
                   <FolderTree className="h-4 w-4" />
                 </Button>
                 <Button
-                  variant={leftPanelMode === "advanced" ? "secondary" : "ghost"}
+                  variant={leftPanelMode === "models" ? "secondary" : "ghost"}
                   size="icon"
                   className="h-10 w-10"
-                  onClick={() => setLeftPanelMode((current) => (current === "advanced" ? "tree" : "advanced"))}
-                  title="Advanced Tools"
+                  onClick={() => setLeftPanelMode("models")}
+                  title="Models"
                 >
-                  <WandSparkles className="h-4 w-4" />
+                  <Boxes className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant={leftPanelMode === "account" ? "secondary" : "ghost"}
+                  size="icon"
+                  className="h-10 w-10"
+                  onClick={() => setLeftPanelMode("account")}
+                  title="Account"
+                >
+                  <UserRound className="h-4 w-4" />
                 </Button>
 
                 <div className="mt-auto flex flex-col gap-2 text-center">
-                  <div className="rounded-md border border-border/80 bg-background/70 px-2 py-1 text-[10px] text-muted-foreground">
-                    Runtime
-                    <div className="font-semibold text-foreground">{runtimeIssues}</div>
-                  </div>
                   {syncIssues.length > 0 ? (
                     <div className="rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1 text-[10px] text-destructive">
                       Sync
@@ -339,21 +386,15 @@ export function StudioShell() {
               </div>
 
               <Panel className="my-3 mr-3 ml-0 flex min-h-0 w-[340px] min-w-[340px] max-w-[340px] self-stretch flex-col overflow-hidden rounded-l-none">
-                {renderSidebarContent()}
+                <div className="min-h-0 flex-1 overflow-hidden">{renderSidebarContent()}</div>
               </Panel>
             </div>
 
             <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
               <div className="relative min-h-0 flex-1 overflow-hidden p-3">
-                <Panel
-                  className={cn(
-                    "h-full overflow-hidden transition-[margin] duration-200",
-                    inspectorOpen ? "mr-[392px]" : "mr-0",
-                  )}
-                >
+                <Panel className="h-full overflow-hidden">
                   <PromptGraphCanvas
-                    viewMode={viewMode}
-                    graphOverride={viewMode === "structure" ? structureGraph : null}
+                    layout={canvasLayout}
                     onNodeActivate={handleNodeActivate}
                     onPaneActivate={handlePaneActivate}
                     onPaneContextMenu={(position) => {
@@ -367,23 +408,6 @@ export function StudioShell() {
                     onNodeContextMenu={handleNodeContextMenu}
                   />
                 </Panel>
-
-                {inspectorOpen ? (
-                  <aside className="absolute inset-y-3 right-3 z-20 w-[380px] max-w-[calc(100vw-5rem)]">
-                    <Panel className="flex h-full flex-col overflow-hidden rounded-none rounded-l-xl border-l border-border bg-card/95 shadow-2xl">
-                      <div className="flex items-center justify-between border-b border-border px-4 py-3">
-                        <div>
-                          <h2 className="text-sm font-semibold">Inspector</h2>
-                          <p className="text-xs text-muted-foreground">Configuration lives here. Canvas stays structural.</p>
-                        </div>
-                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={closeInspector}>
-                          <X className="h-4 w-4" />
-                        </Button>
-                      </div>
-                      <InspectorPanel contextualOnly showHeader={false} />
-                    </Panel>
-                  </aside>
-                ) : null}
               </div>
 
               <div
@@ -396,6 +420,54 @@ export function StudioShell() {
               </div>
             </div>
           </div>
+
+          {inspectorOpen ? (
+            <>
+              <div className="absolute inset-0 z-30 bg-background/70 backdrop-blur-sm" onClick={closeInspector} />
+              <div className="absolute inset-3 z-40 flex min-h-0 overflow-hidden rounded-2xl border border-border bg-card/95 shadow-2xl">
+                <div className="flex min-w-0 flex-1 flex-col">
+                  <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+                    <div>
+                      <h2 className="text-sm font-semibold">Node Workspace</h2>
+                      <p className="text-xs text-muted-foreground">
+                        {selectedWorkspaceNode?.data.title
+                          ? `${selectedWorkspaceNode.data.title}. Author on the left. Review composed prompt and rendered results on the right.`
+                          : "Author on the left. Review composed prompt and rendered results on the right."}
+                      </p>
+                    </div>
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={closeInspector}>
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+
+                  <div className="flex min-h-0 flex-1 overflow-hidden">
+                    <div className="flex min-w-0 flex-1 flex-col border-r border-border">
+                      <div className="border-b border-border px-4 py-3">
+                        <Tabs value={workspaceAuthorTab} onValueChange={(value) => setWorkspaceAuthorTab(value as WorkspaceAuthorTab)}>
+                          <TabsList>
+                            <TabsTrigger value="prompt">Prompt</TabsTrigger>
+                            <TabsTrigger value="config">Config</TabsTrigger>
+                          </TabsList>
+                        </Tabs>
+                      </div>
+                      <div className="min-h-0 flex-1 overflow-hidden">
+                        <InspectorPanel
+                          contextualOnly
+                          showHeader={false}
+                          forcedWorkspaceTab={workspaceAuthorTab}
+                          onRevealRuntimeConsole={() => setConsoleState("expanded")}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex min-w-0 flex-1 flex-col">
+                      <NodeWorkspaceResultsPanel />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </>
+          ) : null}
         </main>
       )}
 
@@ -502,19 +574,42 @@ export function StudioShell() {
                   Add Use Prompt dependency
                 </button>
               ) : null}
-              <button
-                type="button"
-                className="rounded-md px-3 py-2 text-left text-sm hover:bg-muted"
-                onClick={() => {
-                  setLeftPanelMode("advanced");
-                  setCommandPaletteOpen(false);
-                }}
-              >
-                Open Advanced Tools
-              </button>
             </div>
           </div>
         </>
+      ) : null}
+
+      {logoutDialogOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 p-6 backdrop-blur-sm">
+          <button
+            type="button"
+            className="absolute inset-0 cursor-default bg-transparent"
+            aria-label="Close logout dialog"
+            onClick={() => setLogoutDialogOpen(false)}
+          />
+          <Panel className="relative z-10 w-full max-w-md border-border/80 bg-card/95 p-6 shadow-2xl">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">Confirm Logout</p>
+            <h2 className="mt-3 text-2xl font-semibold tracking-tight">Leave current Studio session?</h2>
+            <p className="mt-3 text-sm text-muted-foreground">
+              PromptFarm will clear the local Studio workspace from this browser session and return you to the owner login screen.
+            </p>
+            <div className="mt-6 flex justify-end gap-3">
+              <Button variant="outline" onClick={() => setLogoutDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setLogoutDialogOpen(false);
+                  void logOut();
+                }}
+              >
+                <LogOut className="h-4 w-4" />
+                Logout
+              </Button>
+            </div>
+          </Panel>
+        </div>
       ) : null}
     </div>
   );

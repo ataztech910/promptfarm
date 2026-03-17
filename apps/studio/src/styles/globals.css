@@ -49,6 +49,131 @@
   }
 }
 
+@layer components {
+  .pf-editor-canvas {
+    @apply h-full text-foreground;
+  }
+
+  .pf-editor-canvas .codex-editor {
+    @apply min-h-full pb-20;
+  }
+
+  .pf-editor-canvas .codex-editor__redactor {
+    @apply px-8 py-6;
+  }
+
+  .pf-editor-canvas .ce-block__content,
+  .pf-editor-canvas .ce-toolbar__content {
+    max-width: 820px;
+  }
+
+  .pf-editor-canvas .ce-block {
+    @apply py-1;
+  }
+
+  .pf-editor-canvas .ce-paragraph,
+  .pf-editor-canvas .cdx-input,
+  .pf-editor-canvas .ce-header {
+    @apply text-foreground;
+  }
+
+  .pf-editor-canvas .ce-toolbar__plus,
+  .pf-editor-canvas .ce-toolbar__settings-btn {
+    @apply rounded-full border border-border bg-card text-foreground shadow-none;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.22);
+  }
+
+  .pf-editor-canvas .ce-toolbar__plus:hover,
+  .pf-editor-canvas .ce-toolbar__settings-btn:hover {
+    @apply bg-muted;
+  }
+
+  .pf-editor-canvas .ce-inline-toolbar,
+  .pf-editor-canvas .ce-conversion-toolbar,
+  .pf-editor-canvas .ce-popover,
+  .pf-editor-canvas .ce-toolbar__actions,
+  .pf-editor-canvas .ce-settings {
+    background: hsl(var(--card));
+    color: hsl(var(--foreground));
+    border: 1px solid hsl(var(--border));
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  }
+
+  .pf-editor-canvas .ce-popover-item,
+  .pf-editor-canvas .ce-inline-tool,
+  .pf-editor-canvas .ce-toolbar__plus,
+  .pf-editor-canvas .ce-toolbar__settings-btn,
+  .pf-editor-canvas .ce-conversion-toolbar__label,
+  .pf-editor-canvas .ce-popover-item__title,
+  .pf-editor-canvas .ce-popover-item__icon,
+  .pf-editor-canvas .ce-conversion-tool {
+    color: hsl(var(--foreground));
+  }
+
+  .pf-editor-canvas .ce-popover-item:hover,
+  .pf-editor-canvas .ce-inline-tool:hover,
+  .pf-editor-canvas .ce-toolbar__plus:hover,
+  .pf-editor-canvas .ce-toolbar__settings-btn:hover,
+  .pf-editor-canvas .ce-conversion-tool:hover {
+    background: hsl(var(--muted));
+  }
+
+  .pf-editor-canvas .ce-block--selected .ce-block__content {
+    background: transparent;
+  }
+
+  .pf-editor-tool {
+    @apply rounded-md px-1 py-1;
+  }
+
+  .pf-editor-tool__meta {
+    @apply mb-1 flex items-center gap-2 text-[11px] text-muted-foreground opacity-45 transition-opacity;
+  }
+
+  .pf-editor-tool:hover .pf-editor-tool__meta,
+  .pf-editor-tool:focus-within .pf-editor-tool__meta {
+    @apply opacity-100;
+  }
+
+  .pf-editor-tool__label {
+    @apply text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground;
+  }
+
+  .pf-editor-tool__role-select {
+    @apply h-6 rounded-full border border-border/80 bg-background/70 px-2 text-[10px] uppercase tracking-[0.14em] text-muted-foreground outline-none;
+  }
+
+  .pf-editor-tool__surface {
+    @apply min-h-[2.5rem] text-[15px] leading-8 text-foreground outline-none;
+    white-space: pre-wrap;
+  }
+
+  .pf-editor-tool__surface[data-tone="primary"] {
+    @apply text-[1.2rem] leading-9 font-medium text-foreground;
+  }
+
+  .pf-editor-tool__surface[data-tone="example"] {
+    @apply text-foreground/90;
+  }
+
+  .pf-editor-tool__surface[data-tone="constraint"] {
+    @apply text-amber-50/95;
+  }
+
+  .pf-editor-tool__surface:empty::before {
+    content: attr(data-placeholder);
+    @apply text-muted-foreground;
+  }
+
+  .pf-editor-workspace {
+    @apply h-full rounded-xl border border-border/70 bg-card/30;
+  }
+
+  .pf-editor-workspace__hint {
+    @apply border-b border-border/70 px-5 py-3 text-xs text-muted-foreground;
+  }
+}
+
 @layer base {
   :root {
     --background: 222 20% 8%;

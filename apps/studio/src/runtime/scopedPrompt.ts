@@ -17,15 +17,33 @@ function cloneBlock(block: PromptBlock): PromptBlock {
   return JSON.parse(JSON.stringify(block)) as PromptBlock;
 }
 
-function cloneScopedBlockPath(path: PromptBlock[]): PromptBlock[] {
-  const [current, ...rest] = path;
+function cloneScopedBlockPath(path: PromptBlock[], depth = 0): PromptBlock[] {
+  const current = path[depth];
   if (!current) {
     return [];
   }
 
   const next = cloneBlock(current);
-  next.children = cloneScopedBlockPath(rest);
+  if (depth < path.length - 1) {
+    next.children = cloneScopedBlockPath(path, depth + 1);
+  }
   return [next];
+}
+
+function collectSubtreeContribution(block: PromptBlock): {
+  inputs: PromptBlock["inputs"];
+  messages: PromptBlock["messages"];
+} {
+  const inputs = block.inputs.map((input) => ({ ...input }));
+  const messages = block.messages.map((message) => ({ ...message }));
+
+  for (const child of block.children) {
+    const childContribution = collectSubtreeContribution(child);
+    inputs.push(...childContribution.inputs);
+    messages.push(...childContribution.messages);
+  }
+
+  return { inputs, messages };
 }
 
 export function createScopedPromptFromBlock(rootPrompt: Prompt, blockId: string): ScopedPromptResult {
@@ -38,7 +56,7 @@ export function createScopedPromptFromBlock(rootPrompt: Prompt, blockId: string)
   }
 
   const selected = path[path.length - 1]!;
-  const ancestors = path.slice(0, -1);
+  const subtreeContribution = collectSubtreeContribution(selected);
   const scopedPrompt = PromptSchema.parse({
     apiVersion: rootPrompt.apiVersion,
     kind: rootPrompt.kind,
@@ -50,11 +68,10 @@ export function createScopedPromptFromBlock(rootPrompt: Prompt, blockId: string)
     },
     spec: {
       artifact: rootPrompt.spec.artifact,
-      // Runtime composition resolves spec.inputs/spec.messages, so selected block content
-      // must be hoisted into the scoped prompt while keeping the block tree for context.
-      inputs: [...rootPrompt.spec.inputs, ...ancestors.flatMap((block) => block.inputs), ...selected.inputs],
-      messages: [...rootPrompt.spec.messages, ...ancestors.flatMap((block) => block.messages), ...selected.messages],
-      use: rootPrompt.spec.use,
+      // Block scope is bottom-up: selected node plus its visible descendants only.
+      inputs: subtreeContribution.inputs,
+      messages: subtreeContribution.messages,
+      use: [],
       evaluation: rootPrompt.spec.evaluation,
       buildTargets: [],
       blocks: cloneScopedBlockPath(path),
