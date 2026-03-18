@@ -232,9 +232,9 @@ export function NodeWorkspaceResultsPanel() {
   const promptText =
     selection?.kind === "use_prompt"
       ? dependencyPromptPreview?.renderedText ?? ""
-      : selectedScopePromptPreview?.renderedText ?? liveCompiled?.text ?? "";
+      : liveCompiled?.text ?? selectedScopePromptPreview?.renderedText ?? "";
   const hasPromptPreview =
-    selection?.kind === "use_prompt" ? Boolean(dependencyPromptPreview) : Boolean(selectedScopePromptPreview ?? liveCompiled);
+    selection?.kind === "use_prompt" ? Boolean(dependencyPromptPreview) : Boolean(liveCompiled ?? selectedScopePromptPreview);
   const structureSourceRef = selection && selection.kind !== "use_prompt" ? selection.ref : null;
   const canonicalChildBlocks = useMemo(() => {
     if (!selection || selection.kind === "use_prompt") {

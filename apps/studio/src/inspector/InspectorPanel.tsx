@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import type { MessageTemplate, Prompt, PromptBlock } from "@promptfarm/core";
+import type { Prompt, PromptBlock } from "@promptfarm/core";
 import { ArtifactType } from "@promptfarm/core";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -13,6 +13,7 @@ import {
   resolveEditorSelection,
 } from "./editorSession";
 import { PromptBlockWorkspace } from "./PromptBlockWorkspace";
+import { compilePromptWorkspaceBlocks, createPromptWorkspaceBlocks } from "./promptDocumentAdapter";
 import { getBuildTargetHelperLabel, getBuildTargetOptionsForArtifact } from "../model/artifactBuildTargets";
 import { getPromptBlockPath } from "../model/promptTree";
 import type { StudioGraphProposalBlock } from "../graph/types";
@@ -257,6 +258,35 @@ export function InspectorPanel({
       : null;
   const isMessageSuggestionStale =
     Boolean(activeMessageSuggestion && messageSuggestionInputSignature && activeMessageSuggestion.inputSignature !== messageSuggestionInputSignature);
+  const isLiveDraftPreview = Boolean(
+    draft &&
+      selection &&
+      selection.kind !== "use_prompt" &&
+      (draft.entityKind === "prompt" || draft.entityKind === "block"),
+  );
+  const liveDraftCompiledPreview = useMemo(() => {
+    if (!isLiveDraftPreview || !draft || draft.entityKind === "use_prompt") {
+      return null;
+    }
+    return compilePromptWorkspaceBlocks(createPromptWorkspaceBlocks(draft));
+  }, [draft, isLiveDraftPreview]);
+  
+  const renderedPromptText = isLiveDraftPreview ? (liveDraftCompiledPreview?.text ?? null) : (selectedScopePromptPreview?.renderedText ?? null);
+  const renderedPromptScopeLabel =
+    selectedScopePromptPreview?.scope.label ??
+    (selection?.kind === "block"
+      ? selection.block.title
+      : selection?.kind === "prompt"
+        ? (selection.prompt.metadata.title ?? selection.prompt.metadata.id)
+        : "(unknown)");
+  const renderedPromptInputNames =
+    isLiveDraftPreview && draft && draft.entityKind !== "use_prompt"
+      ? draft.inputs.map((input) => input.name).filter((name) => name.trim().length > 0)
+      : (selectedScopePromptPreview?.inputNames ?? []);
+  const renderedPromptSelectedMessageCount =
+    isLiveDraftPreview && draft && draft.entityKind !== "use_prompt"
+      ? (liveDraftCompiledPreview?.activeBlockCount ?? 0)
+      : (selectedScopePromptPreview?.selectedMessageCount ?? 0);
 
   function commitModelProfileIds(profileIds: string[]) {
     if (!modelRouting) {
@@ -962,50 +992,72 @@ export function InspectorPanel({
                 </Section>
                 ) : null}
 
-                {selection.kind !== "use_prompt" && activeWorkspaceTab === "output" && selectedScopePromptPreview ? (
-                  <>
-                    <Section title="Rendered Prompt" description="Resolved prompt text for the currently selected scope.">
-                      <div className="space-y-2">
-                        <div className="rounded-md border border-border bg-muted/30 px-2 py-2 text-xs">
-                          <div>Scope: {selectedScopePromptPreview.scope.label}</div>
-                          <div>Inherited messages: {selectedScopePromptPreview.inheritedMessageCount}</div>
-                          <div>Selected messages: {selectedScopePromptPreview.selectedMessageCount}</div>
-                          <div>Inputs: {selectedScopePromptPreview.inputNames.join(", ") || "(none)"}</div>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          <Button type="button" variant="outline" size="sm" onClick={refreshSelectedScopePromptPreview}>
-                            Preview Prompt
-                          </Button>
-                          <Button type="button" variant="outline" size="sm" onClick={() => runSelectedScopeRuntimeAction("resolve")}>
-                            Resolve {selectedScopePromptPreview.scope.mode === "block" ? "Block" : "Root"}
-                          </Button>
-                          <Button type="button" variant="outline" size="sm" onClick={() => runSelectedScopeRuntimeAction("evaluate")}>
-                            Evaluate {selectedScopePromptPreview.scope.mode === "block" ? "Block" : "Root"}
-                          </Button>
-                          <Button type="button" variant="outline" size="sm" onClick={() => runSelectedScopeRuntimeAction("blueprint")}>
-                            Blueprint {selectedScopePromptPreview.scope.mode === "block" ? "Block" : "Root"}
-                          </Button>
-                        </div>
-                        {selectedScopePromptPreview.renderedText ? (
-                          <PreviewValue value={selectedScopePromptPreview.renderedText} />
-                        ) : (
-                          <p className="text-xs text-muted-foreground">Rendered prompt text is not available for this scope.</p>
-                        )}
-                        {selectedScopePromptPreview.issues.length > 0 ? (
-                          <div className="space-y-1">
-                            {selectedScopePromptPreview.issues.map((issue, index) => (
-                              <p key={`${issue.filepath}:${index}`} className="text-xs text-destructive">
-                                {issue.message}
-                              </p>
-                            ))}
-                          </div>
-                        ) : null}
-                      </div>
-                    </Section>
+                {selection.kind !== "use_prompt" && activeWorkspaceTab === "output" && (selectedScopePromptPreview || isLiveDraftPreview) ? (
+  <>
+    <Section title="Rendered Prompt" description="Resolved prompt text for the currently selected scope.">
+      <div className="space-y-2">
+        <div className="rounded-md border border-border bg-muted/30 px-2 py-2 text-xs">
+          <div>Scope: {renderedPromptScopeLabel}</div>
+          <div>{isLiveDraftPreview ? "Source: Live Draft Preview" : `Inherited messages: ${selectedScopePromptPreview?.inheritedMessageCount ?? 0}`}</div>
+          <div>Selected messages: {renderedPromptSelectedMessageCount}</div>
+          <div>Inputs: {renderedPromptInputNames.join(", ") || "(none)"}</div>
+        </div>
+        
+        {/* ИСПРАВЛЕНИЕ: Используем liveDraftCompiledPreview вместо selectedScopePromptPreview */}
+        {isLiveDraftPreview ? (
+          <>
+            <div className="rounded-md border border-amber-300/40 bg-amber-50/40 px-2 py-2 text-xs text-muted-foreground">
+              Live Draft Preview
+            </div>
+            {liveDraftCompiledPreview?.text ? (
+              <PreviewValue value={liveDraftCompiledPreview.text} />
+            ) : (
+              <p className="text-xs text-muted-foreground">No compiled preview available</p>
+            )}
+          </>
+        ) : (
+          <>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={refreshSelectedScopePromptPreview}>
+                Preview Prompt
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => runSelectedScopeRuntimeAction("resolve")}>
+                Resolve {selectedScopePromptPreview?.scope.mode === "block" ? "Block" : "Root"}
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => runSelectedScopeRuntimeAction("evaluate")}>
+                Evaluate {selectedScopePromptPreview?.scope.mode === "block" ? "Block" : "Root"}
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => runSelectedScopeRuntimeAction("blueprint")}>
+                Blueprint {selectedScopePromptPreview?.scope.mode === "block" ? "Block" : "Root"}
+              </Button>
+            </div>
+            {renderedPromptText ? (
+              <PreviewValue value={renderedPromptText} />
+            ) : (
+              <p className="text-xs text-muted-foreground">Rendered prompt text is not available for this scope.</p>
+            )}
+            {selectedScopePromptPreview && selectedScopePromptPreview.issues.length > 0 ? (
+              <div className="space-y-1">
+                {selectedScopePromptPreview.issues.map((issue, index) => (
+                  <p key={`${issue.filepath}:${index}`} className="text-xs text-destructive">
+                    {issue.message}
+                  </p>
+                ))}
+              </div>
+            ) : null}
+          </>
+        )}
+      </div>
+    </Section>
 
                   <Section title="Latest Output" description="Last stored runtime result for the selected scope.">
                       {selectedScopeOutput ? (
                         <div className="space-y-2">
+                          {isLiveDraftPreview ? (
+                            <div className="rounded-md border border-border bg-muted/20 px-2 py-2 text-xs text-muted-foreground">
+                              This is still the last stored/runtime result. It does not include the Live Draft Preview shown above.
+                            </div>
+                          ) : null}
                           <div className="rounded-md border border-border bg-muted/30 px-2 py-2 text-xs">
                           <div>Action: {selectedScopeOutput.action}</div>
                           <div>Type: {selectedScopeOutput.contentType}</div>

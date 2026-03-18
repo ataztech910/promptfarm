@@ -368,29 +368,9 @@ export function addPromptDocumentPresetBlock(
 }
 
 export function createPromptWorkspaceBlocks(draft: PromptEditableDraft): PromptWorkspaceBlock[] {
-  const model = createPromptDocumentModel(draft);
   const blocks: PromptWorkspaceBlock[] = [];
 
-  if (model.primaryInstructionIndex >= 0) {
-    blocks.push({
-      id: "prompt_instruction",
-      kind: "prompt",
-      enabled: true,
-      collapsed: false,
-      role: "user",
-      content: draft.messages[model.primaryInstructionIndex]?.content ?? "",
-    });
-  } else {
-    blocks.push({
-      id: "prompt_instruction",
-      kind: "prompt",
-      enabled: true,
-      collapsed: false,
-      role: "user",
-      content: "",
-    });
-  }
-
+  // Variables first — stored in draft.inputs, has no position in the messages array
   blocks.push({
     id: "variables",
     kind: "variables",
@@ -402,66 +382,56 @@ export function createPromptWorkspaceBlocks(draft: PromptEditableDraft): PromptW
     })),
   });
 
-  if (model.contextMessageIndex >= 0) {
-    const parsed = parseContextBlock(draft.messages[model.contextMessageIndex]?.content ?? "");
-    blocks.push({
-      id: `context:${model.contextMessageIndex}`,
-      kind: "context",
-      enabled: true,
-      collapsed: false,
-      role: draft.messages[model.contextMessageIndex]?.role ?? "system",
-      label: parsed.label,
-      content: parsed.content,
-    });
-  }
+  // Iterate messages in their exact order — no hardcoded positions
+  let i = 0;
+  while (i < draft.messages.length) {
+    const message = draft.messages[i]!;
+    const firstLine = (message.content.split("\n")[0] ?? "").trim().toLowerCase();
 
-  for (let index = 0; index < model.additionalBlocks.length; index += 1) {
-    const block = model.additionalBlocks[index]!;
-    const message = draft.messages[block.index]!;
-
-    if (block.kind === "example_input") {
-      const nextBlock = model.additionalBlocks[index + 1];
-      const nextMessage = nextBlock ? draft.messages[nextBlock.index] : null;
-      if (nextBlock?.kind === "example_output" && nextMessage) {
+    if (firstLine.startsWith("example input:")) {
+      const nextMessage = draft.messages[i + 1];
+      const nextFirstLine = (nextMessage?.content.split("\n")[0] ?? "").trim().toLowerCase();
+      if (nextMessage && nextFirstLine.startsWith("example output:")) {
         blocks.push({
-          id: `example:${block.index}`,
+          id: `example:${i}`,
           kind: "example",
           enabled: true,
           collapsed: false,
           input: stripPrefixedHeading(message.content, "Example input:"),
           output: stripPrefixedHeading(nextMessage.content, "Example output:"),
         });
-        index += 1;
+        i += 2;
         continue;
       }
-
       blocks.push({
-        id: `example:${block.index}`,
+        id: `example:${i}`,
         kind: "example",
         enabled: true,
         collapsed: false,
         input: stripPrefixedHeading(message.content, "Example input:"),
         output: "",
       });
+      i += 1;
       continue;
     }
 
-    if (block.kind === "example_output") {
+    if (firstLine.startsWith("example output:")) {
       blocks.push({
-        id: `example:${block.index}`,
+        id: `example:${i}`,
         kind: "example",
         enabled: true,
         collapsed: false,
         input: "",
         output: stripPrefixedHeading(message.content, "Example output:"),
       });
+      i += 1;
       continue;
     }
 
-    if (block.kind === "context") {
+    if (firstLine.startsWith("additional context:") || firstLine.startsWith("[context:") || message.role === "system") {
       const parsed = parseContextBlock(message.content);
       blocks.push({
-        id: `context:${block.index}`,
+        id: `context:${i}`,
         kind: "context",
         enabled: true,
         collapsed: false,
@@ -469,35 +439,38 @@ export function createPromptWorkspaceBlocks(draft: PromptEditableDraft): PromptW
         label: parsed.label,
         content: parsed.content,
       });
+      i += 1;
       continue;
     }
 
-    if (block.kind === "output_format") {
+    if (firstLine.startsWith("output format:")) {
       blocks.push({
-        id: `output_format:${block.index}`,
+        id: `output_format:${i}`,
         kind: "output_format",
         enabled: true,
         collapsed: false,
         content: stripPrefixedHeading(message.content, "Output format:"),
       });
+      i += 1;
       continue;
     }
 
-    if (block.kind === "constraint") {
+    if (firstLine.startsWith("constraint:")) {
       blocks.push({
-        id: `constraint:${block.index}`,
+        id: `constraint:${i}`,
         kind: "constraint",
         enabled: true,
         collapsed: false,
         content: stripPrefixedHeading(message.content, "Constraint:"),
       });
+      i += 1;
       continue;
     }
 
-    if (block.kind === "loop") {
+    if (firstLine.startsWith("[loop:")) {
       const parsed = parseLoopBlock(message.content);
       blocks.push({
-        id: `loop:${block.index}`,
+        id: `loop:${i}`,
         kind: "loop",
         enabled: true,
         collapsed: false,
@@ -505,43 +478,60 @@ export function createPromptWorkspaceBlocks(draft: PromptEditableDraft): PromptW
         items: parsed.items,
         content: parsed.body,
       });
+      i += 1;
       continue;
     }
 
-    if (block.kind === "conditional") {
+    if (firstLine.startsWith("[conditional:")) {
       const parsed = parseConditionalBlock(message.content);
       blocks.push({
-        id: `conditional:${block.index}`,
+        id: `conditional:${i}`,
         kind: "conditional",
         enabled: true,
         collapsed: false,
         variable: parsed.variable,
         content: parsed.body,
       });
+      i += 1;
       continue;
     }
 
-    if (block.kind === "metadata") {
+    if (firstLine.startsWith("[metadata:")) {
       const parsed = parseMetadataBlock(message.content);
       blocks.push({
-        id: `metadata:${block.index}`,
+        id: `metadata:${i}`,
         kind: "metadata",
         enabled: true,
         collapsed: false,
         key: parsed.key,
         value: parsed.value,
       });
+      i += 1;
+      continue;
+    }
+
+    if (message.role === "user") {
+      blocks.push({
+        id: `prompt:${i}`,
+        kind: "prompt",
+        enabled: true,
+        collapsed: false,
+        role: "user",
+        content: message.content,
+      });
+      i += 1;
       continue;
     }
 
     blocks.push({
-      id: `generic:${block.index}`,
+      id: `generic:${i}`,
       kind: "generic",
       enabled: true,
       collapsed: false,
       role: message.role,
       content: message.content,
     });
+    i += 1;
   }
 
   return blocks;

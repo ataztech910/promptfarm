@@ -237,7 +237,7 @@ test("workspace blocks roundtrip loop, conditional, and metadata blocks", () => 
   const blocks = createPromptWorkspaceBlocks(draft);
   assert.deepEqual(
     blocks.map((block) => block.kind),
-    ["prompt", "variables", "loop", "conditional", "metadata"],
+    ["variables", "prompt", "loop", "conditional", "metadata"],
   );
 
   const nextDraft = applyPromptWorkspaceBlocks(draft, blocks);

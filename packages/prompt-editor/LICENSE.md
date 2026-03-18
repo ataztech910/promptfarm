@@ -1,0 +1,18 @@
+PolyForm Noncommercial License 1.0.0
+
+Copyright (c) 2026 Andrei Tazetdinov
+
+This project is licensed under the PolyForm Noncommercial License 1.0.0.
+
+You may use, copy, modify, and distribute this software for non-commercial purposes only.
+Commercial use is prohibited unless you obtain a separate commercial license from the copyright holder.
+
+Full license text:
+https://polyformproject.org/licenses/noncommercial/1.0.0/
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
