@@ -18,6 +18,7 @@ npm install react react-dom lucide-react
 import { useState } from "react";
 import {
   PromptBlockEditor,
+  CopyCompiledButton,
   usePromptCompiler,
   createPromptWorkspaceBlock,
 } from "@promptfarm/prompt-editor";
@@ -32,7 +33,10 @@ export function App() {
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", height: "100vh" }}>
-      <PromptBlockEditor blocks={blocks} onChange={setBlocks} />
+      <div style={{ display: "flex", flexDirection: "column" }}>
+        <PromptBlockEditor blocks={blocks} onChange={setBlocks} />
+        <CopyCompiledButton blocks={blocks} />
+      </div>
 
       <pre style={{ padding: "1.5rem", overflowY: "auto", whiteSpace: "pre-wrap" }}>
         {compiled.text || "← Start writing on the left"}
@@ -83,6 +87,21 @@ const { text, tokenCount, activeBlockCount } = usePromptCompiler(blocks);
 | `text` | `string` | The compiled prompt ready to send to the model. |
 | `tokenCount` | `number` | Rough word-count estimate of the compiled text. |
 | `activeBlockCount` | `number` | Number of enabled blocks that contributed to the output. |
+
+### `<CopyCompiledButton>`
+
+A standalone button that compiles the current blocks and copies the result to the clipboard. Place it anywhere in your layout.
+
+```tsx
+import { CopyCompiledButton } from "@promptfarm/prompt-editor";
+
+<CopyCompiledButton
+  blocks={blocks}       // PromptWorkspaceBlock[]
+  className="my-copy"   // optional — extra class on the button
+/>
+```
+
+The button is disabled when there is no compiled output. After a successful copy it shows a checkmark for 2 seconds.
 
 ### `createPromptWorkspaceBlock(kind)`
 
