@@ -9,4 +9,5 @@ export type {
   PromptWorkspaceBlockKind,
   PromptWorkspaceVariableEntry,
   PromptWorkspaceCompileResult,
+  GenericRoleOption,
 } from "./promptDocumentAdapter";

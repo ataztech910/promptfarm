@@ -4,7 +4,7 @@ import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, GripVertical, Plus, Tras
 import { cn } from "./cn";
 import { Button, Input, Textarea } from "./components/ui";
 import { createPromptWorkspaceBlock } from "./promptDocumentAdapter";
-import type { PromptWorkspaceBlock, PromptWorkspaceBlockKind, PromptWorkspaceVariableEntry } from "./promptDocumentAdapter";
+import type { PromptWorkspaceBlock, PromptWorkspaceBlockKind, PromptWorkspaceVariableEntry, GenericRoleOption } from "./promptDocumentAdapter";
 
 export type PromptBlockEditorProps = {
   blocks: PromptWorkspaceBlock[];
@@ -12,6 +12,8 @@ export type PromptBlockEditorProps = {
   /** Pass a new value to reset internal state (e.g. when switching prompts) */
   resetKey?: string;
   className?: string;
+  /** Custom role options for the generic block dropdown. */
+  genericRoleOptions?: GenericRoleOption[];
 };
 
 const BLOCK_LABELS: Record<PromptWorkspaceBlockKind, string> = {
@@ -105,7 +107,15 @@ function hasMeaningfulContent(block: PromptWorkspaceBlock): boolean {
   return (block.content ?? "").trim().length > 0;
 }
 
-export function PromptBlockEditor({ blocks, onChange, resetKey, className }: PromptBlockEditorProps) {
+const DEFAULT_GENERIC_ROLES: GenericRoleOption[] = [
+  { name: "system", description: "System-level instruction" },
+  { name: "developer", description: "Developer-level instruction" },
+  { name: "user", description: "User message" },
+  { name: "assistant", description: "Assistant message" },
+];
+
+export function PromptBlockEditor({ blocks, onChange, resetKey, className, genericRoleOptions }: PromptBlockEditorProps) {
+  const roles = genericRoleOptions ?? DEFAULT_GENERIC_ROLES;
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerQuery, setPickerQuery] = useState("");
   const [draggedBlockId, setDraggedBlockId] = useState<string | null>(null);
@@ -199,6 +209,7 @@ export function PromptBlockEditor({ blocks, onChange, resetKey, className }: Pro
               isLast={index === blocks.length - 1}
               isDragging={draggedBlockId === block.id}
               dropPosition={dropTarget?.blockId === block.id ? dropTarget.position : null}
+              genericRoleOptions={roles}
               onUpdate={(patch) => updateBlock(block.id, patch)}
               onToggle={() => updateBlock(block.id, { enabled: !block.enabled })}
               onToggleCollapse={() => updateBlock(block.id, { collapsed: !block.collapsed })}
@@ -256,7 +267,7 @@ export function PromptBlockEditor({ blocks, onChange, resetKey, className }: Pro
 }
 
 function BlockCard({
-  block, isFirst, isLast, isDragging, dropPosition,
+  block, isFirst, isLast, isDragging, dropPosition, genericRoleOptions,
   onUpdate, onToggle, onToggleCollapse, onRemove, onMove,
   onDragStart, onDragEnd, onDragTarget, onDropBlock,
 }: {
@@ -265,6 +276,7 @@ function BlockCard({
   isLast: boolean;
   isDragging: boolean;
   dropPosition: "before" | "after" | null;
+  genericRoleOptions: GenericRoleOption[];
   onUpdate: (patch: Partial<PromptWorkspaceBlock>) => void;
   onToggle: () => void;
   onToggleCollapse: () => void;
@@ -351,7 +363,7 @@ function BlockCard({
 
       {!block.collapsed ? (
         <div className="px-4 py-4">
-          <BlockBody block={block} onUpdate={onUpdate} />
+          <BlockBody block={block} onUpdate={onUpdate} genericRoleOptions={genericRoleOptions} />
         </div>
       ) : null}
     </div>
@@ -445,7 +457,7 @@ function BlockDeleteDialog({ block, onCancel, onConfirm }: {
   );
 }
 
-function BlockBody({ block, onUpdate }: { block: PromptWorkspaceBlock; onUpdate: (patch: Partial<PromptWorkspaceBlock>) => void }) {
+function BlockBody({ block, onUpdate, genericRoleOptions }: { block: PromptWorkspaceBlock; onUpdate: (patch: Partial<PromptWorkspaceBlock>) => void; genericRoleOptions: GenericRoleOption[] }) {
   if (block.kind === "prompt") {
     return (
       <Textarea
@@ -487,13 +499,12 @@ function BlockBody({ block, onUpdate }: { block: PromptWorkspaceBlock; onUpdate:
         {block.kind === "generic" ? (
           <select
             className="h-9 w-full rounded-md border border-border/80 bg-background/70 px-3 text-sm text-foreground"
-            value={block.role ?? "developer"}
+            value={block.role ?? genericRoleOptions[0]?.name ?? "developer"}
             onChange={(e) => onUpdate({ role: e.target.value as PromptWorkspaceBlock["role"] })}
           >
-            <option value="system">system</option>
-            <option value="developer">developer</option>
-            <option value="user">user</option>
-            <option value="assistant">assistant</option>
+            {genericRoleOptions.map((opt) => (
+              <option key={opt.name} value={opt.name}>{opt.name}</option>
+            ))}
           </select>
         ) : null}
         <Textarea value={block.content ?? ""} onChange={(e) => onUpdate({ content: e.target.value })} placeholder={block.kind === "output_format" ? "Describe the target format." : block.kind === "constraint" ? "Describe the rule or restriction." : "Freeform prompt block."} className="min-h-[120px] border-0 bg-transparent px-0 py-0 font-mono text-[15px] leading-8 shadow-none focus-visible:ring-0" />

@@ -3,20 +3,36 @@ import { Clipboard, Check } from "lucide-react";
 import { cn } from "./cn";
 import { usePromptCompiler } from "./usePromptCompiler";
 import { Button } from "./components/ui";
-import type { PromptWorkspaceBlock } from "./promptDocumentAdapter";
+import type { PromptWorkspaceBlock, GenericRoleOption } from "./promptDocumentAdapter";
 
 export type CopyCompiledButtonProps = {
   blocks: PromptWorkspaceBlock[];
+  genericRoleOptions?: GenericRoleOption[];
   className?: string;
 };
 
-export function CopyCompiledButton({ blocks, className }: CopyCompiledButtonProps) {
-  const [copied, setCopied] = useState(false);
-  const { text } = usePromptCompiler(blocks);
+function copyText(text: string): void {
+  if (navigator?.clipboard?.writeText) {
+    navigator.clipboard.writeText(text);
+    return;
+  }
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.select();
+  document.execCommand("copy");
+  document.body.removeChild(ta);
+}
 
-  const handleCopy = useCallback(async () => {
+export function CopyCompiledButton({ blocks, genericRoleOptions, className }: CopyCompiledButtonProps) {
+  const [copied, setCopied] = useState(false);
+  const { text } = usePromptCompiler(blocks, genericRoleOptions);
+
+  const handleCopy = useCallback(() => {
     if (!text) return;
-    await navigator.clipboard.writeText(text);
+    copyText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }, [text]);
@@ -24,13 +40,13 @@ export function CopyCompiledButton({ blocks, className }: CopyCompiledButtonProp
   return (
     <Button
       type="button"
-      variant="outline"
+      variant="ghost"
       disabled={!text}
       onClick={handleCopy}
       className={cn("gap-2", className)}
     >
       {copied ? <Check className="h-4 w-4" /> : <Clipboard className="h-4 w-4" />}
-      {copied ? "Copied!" : "Copy Prompt"}
+      {copied ? "Copied!" : "Copy"}
     </Button>
   );
 }

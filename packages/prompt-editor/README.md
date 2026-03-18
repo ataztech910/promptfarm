@@ -59,7 +59,7 @@ export function App() {
 | `loop` | Repeats a template once for each item in a comma-separated list. |
 | `conditional` | Includes content only when a specific variable is non-empty. |
 | `metadata` | Renders a single `key: value` line into the compiled output. |
-| `generic` | Freeform fallback block with a configurable message role. |
+| `generic` | Freeform block with a configurable role dropdown. Rendered as `[Role: description]\ncontent`. |
 
 ## API
 
@@ -71,15 +71,20 @@ export function App() {
   onChange={setBlocks}   // (blocks: PromptWorkspaceBlock[]) => void
   resetKey="prompt-1"    // optional — pass a new value to reset editor state
   className="my-editor"  // optional — extra class on the root element
+  genericRoleOptions={[  // optional — custom roles for the generic block dropdown
+    { name: "analyst",  description: "You are an analyst, your job is to analyze data" },
+    { name: "reviewer", description: "You are a code reviewer focused on quality" },
+    { name: "editor",   description: "You are an editor improving clarity and tone" },
+  ]}
 />
 ```
 
-### `usePromptCompiler(blocks)`
+### `usePromptCompiler(blocks, genericRoleOptions?)`
 
 Reactively compiles blocks into a flat prompt string with variable interpolation applied.
 
 ```tsx
-const { text, tokenCount, activeBlockCount } = usePromptCompiler(blocks);
+const { text, tokenCount, activeBlockCount } = usePromptCompiler(blocks, genericRoleOptions);
 ```
 
 | Field | Type | Description |
@@ -96,8 +101,9 @@ A standalone button that compiles the current blocks and copies the result to th
 import { CopyCompiledButton } from "@promptfarm/prompt-editor";
 
 <CopyCompiledButton
-  blocks={blocks}       // PromptWorkspaceBlock[]
-  className="my-copy"   // optional — extra class on the button
+  blocks={blocks}              // PromptWorkspaceBlock[]
+  genericRoleOptions={roles}   // optional — same roles passed to the editor
+  className="my-copy"          // optional — extra class on the button
 />
 ```
 
@@ -113,15 +119,35 @@ import { createPromptWorkspaceBlock } from "@promptfarm/prompt-editor";
 const block = createPromptWorkspaceBlock("context");
 ```
 
-### `compilePromptWorkspaceBlocks(blocks)`
+### `compilePromptWorkspaceBlocks(blocks, genericRoleOptions?)`
 
 The raw compiler function — useful for server-side or non-React environments.
 
 ```ts
 import { compilePromptWorkspaceBlocks } from "@promptfarm/prompt-editor";
 
-const { text } = compilePromptWorkspaceBlocks(blocks);
+const { text } = compilePromptWorkspaceBlocks(blocks, roles);
 ```
+
+### `GenericRoleOption`
+
+Type for configuring the generic block's role dropdown.
+
+```ts
+type GenericRoleOption = {
+  name: string;        // displayed in the dropdown
+  description: string; // rendered into the compiled prompt as [Role: description]
+};
+```
+
+When a generic block with role `"analyst"` is compiled, the output is:
+
+```
+[Role: You are an analyst, your job is to analyze data]
+additional instructions from the text field
+```
+
+If no `genericRoleOptions` are provided, the editor falls back to default roles: `system`, `developer`, `user`, `assistant`.
 
 ## Theming
 
