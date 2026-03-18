@@ -244,7 +244,7 @@ export async function executeStudioRemoteLlm(
         return record;
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      await new Promise((resolve) => setTimeout(resolve, 2000));
     }
   } finally {
     input.signal?.removeEventListener("abort", abortHandler);

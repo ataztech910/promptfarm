@@ -171,7 +171,7 @@ export function ModelRegistryPanel() {
                   <Input
                     list="studio-node-model-suggestions"
                     value={nodeLlmSettings.model}
-                    placeholder="qwen3:14b"
+                    placeholder="qwen3:8b"
                     onChange={(event) => setNodeLlmSettings({ model: event.target.value })}
                   />
                   {discoveredModels.length > 0 ? (

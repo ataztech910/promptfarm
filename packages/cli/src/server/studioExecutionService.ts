@@ -102,18 +102,14 @@ export function createStudioExecutionService(input: {
           const result = await llmClient.generateText({
             messages: request.messages,
             signal: controller.signal,
-            ...(request.mode === "structure"
-              ? {
-                  stream: true,
-                  onDelta: (_deltaText, aggregateText) => {
-                    const currentRecord = input.executionRepository.get(request.executionId) ?? executionRecord;
-                    input.executionRepository.put({
-                      ...currentRecord,
-                      output: aggregateText,
-                    });
-                  },
-                }
-              : {}),
+            stream: true,
+            onDelta: (_deltaText, aggregateText) => {
+              const currentRecord = input.executionRepository.get(request.executionId) ?? executionRecord;
+              input.executionRepository.put({
+                ...currentRecord,
+                output: aggregateText,
+              });
+            },
           });
 
           const currentRecord = input.executionRepository.get(request.executionId) ?? executionRecord;

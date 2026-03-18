@@ -10,6 +10,8 @@ export function NodeWorkspaceActionBar() {
   const rejectAllNodeGraphProposals = useStudioStore((s) => s.rejectAllNodeGraphProposals);
   const graphProposals = useStudioStore((s) => s.graphProposals);
   const nodeRuntimeStates = useStudioStore((s) => s.nodeRuntimeStates);
+  const synthesizeSkill = useStudioStore((s) => s.synthesizeSkill);
+  const skillSynthesis = useStudioStore((s) => s.skillSynthesis);
 
   if (!canonicalPrompt || !selectedNodeId) {
     return null;
@@ -24,9 +26,25 @@ export function NodeWorkspaceActionBar() {
   const structureSourceRef =
     selectedNodeId.startsWith("prompt:") ? `prompt:${canonicalPrompt.metadata.id}` : selectedNodeId.startsWith("block:") ? selectedNodeId : null;
 
+  const isRootSelected = selectedNodeId.startsWith("prompt:");
+  const tags = canonicalPrompt.metadata.tags ?? [];
+  const isImportedSkill = isRootSelected && tags.includes("url_source");
+  const isSynthesizing = skillSynthesis.status === "running";
+
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
       <div className="flex flex-wrap items-center gap-2">
+        {isImportedSkill ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={isSynthesizing}
+            onClick={() => { void synthesizeSkill(); }}
+          >
+            {isSynthesizing ? "Synthesizing…" : "Synthesize Skill"}
+          </Button>
+        ) : null}
         <Button
           type="button"
           size="sm"
@@ -53,6 +71,9 @@ export function NodeWorkspaceActionBar() {
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
+        {skillSynthesis.status === "failure" && isRootSelected ? (
+          <Badge className="bg-transparent text-destructive">{skillSynthesis.message}</Badge>
+        ) : null}
         {runtimeState ? <Badge className="bg-transparent">{runtimeState.status}</Badge> : null}
         {activeNodeProposals.length > 0 ? <Badge className="bg-transparent">{activeNodeProposals.length} proposal{activeNodeProposals.length === 1 ? "" : "s"}</Badge> : null}
       </div>

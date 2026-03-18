@@ -89,6 +89,8 @@ import {
   type StudioNodeLlmProfile,
   type StudioNodeLlmPresetId,
   type StudioNodeLlmSettings,
+  readPersistedStudioNodeLlmProfiles,
+  writePersistedStudioNodeLlmProfiles,
   writePersistedStudioNodeLlmSettings,
 } from "../runtime/nodeLlmClient";
 import {
@@ -106,6 +108,17 @@ import {
   writePersistedStudioPromptRuntime,
   type PersistedStudioPromptRuntime,
 } from "../runtime/studioPersistence";
+import {
+  buildChunkCompressionInstruction,
+  buildChunkCompressionUserPrompt,
+  buildSkillSynthesisInstruction,
+  buildSkillSynthesisUserPrompt,
+  collectImportedSourceChunks,
+  createChunkBatches,
+  parseChunkCompressionResponse,
+  parseSkillSynthesisResponse,
+  type CompressedChunkSummary,
+} from "../runtime/skillSynthesis";
 
 type StudioNodeLlmProbeState = {
   status: "idle" | "testing" | "success" | "failure";
@@ -748,6 +761,7 @@ type StudioState = {
   nodeLlmProbe: StudioNodeLlmProbeState;
   nodeLlmModelCatalog: StudioNodeLlmModelCatalogState;
   messageSuggestion: StudioMessageSuggestionState;
+  skillSynthesis: StudioSkillSynthesisState;
   consoleEvents: StudioConsoleEvent[];
   nodeModelAssignments: StudioNodeModelAssignments;
   nodeModelStrategies: StudioNodeModelStrategies;
@@ -785,6 +799,7 @@ type StudioState = {
   suggestMessagesForActiveDraft: () => Promise<void>;
   applyMessageSuggestionToActiveDraft: () => void;
   clearMessageSuggestion: () => void;
+  synthesizeSkill: () => Promise<void>;
   setNodeModelAssignments: (nodeId: string, profileIds: string[]) => void;
   clearNodeModelAssignments: (nodeId: string) => void;
   setNodeModelStrategy: (nodeId: string, patch: Partial<StudioNodeModelStrategy>) => void;
@@ -875,6 +890,7 @@ let nextGraphProposalSequence = 1;
 let nextNodeResultHistorySequence = 1;
 let nextMessageSuggestionSequence = 1;
 let nextConsoleEventSequence = 1;
+let nextSkillSynthesisSequence = 1;
 
 function getPromptRuntimeNodeId(prompt: Prompt): string {
   return `prompt_root_${prompt.metadata.id}`;
@@ -935,6 +951,18 @@ function emptyMessageSuggestionState(): StudioMessageSuggestionState {
   };
 }
 
+type StudioSkillSynthesisState = {
+  status: "idle" | "running" | "success" | "failure";
+  message: string | null;
+  partialOutput: string | null;
+  stage: "compressing" | "synthesizing" | null;
+  compressProgress: { done: number; total: number } | null;
+};
+
+function emptySkillSynthesisState(): StudioSkillSynthesisState {
+  return { status: "idle", message: null, partialOutput: null, stage: null, compressProgress: null };
+}
+
 function createConsoleEvent(input: {
   status: StudioConsoleEvent["status"];
   category: StudioConsoleEvent["category"];
@@ -971,6 +999,51 @@ function createNodeLlmProfileId(): string {
 }
 
 function createInitialNodeLlmProfiles(): { profiles: Record<string, StudioNodeLlmProfile>; order: string[] } {
+  const persisted = readPersistedStudioNodeLlmProfiles();
+  if (persisted) {
+    // Advance the sequence counter past persisted IDs to avoid collisions
+    for (const id of persisted.order) {
+      const match = id.match(/^llm_profile_(\d+)$/);
+      if (match) {
+        const num = parseInt(match[1]!, 10);
+        if (num >= nextNodeLlmProfileSequence) {
+          nextNodeLlmProfileSequence = num + 1;
+        }
+      }
+    }
+
+    // Sync persisted profiles with current nodeLlmSettings — if the user changed
+    // the model via the dropdown, the profile may still have the old model value.
+    const currentSettings = getInitialStudioNodeLlmSettings();
+    if (currentSettings.baseUrl && currentSettings.model) {
+      let profilesSynced = false;
+      for (const profileId of persisted.order) {
+        const profile = persisted.profiles[profileId];
+        if (
+          profile &&
+          profile.settings.baseUrl === currentSettings.baseUrl &&
+          profile.settings.providerLabel === currentSettings.providerLabel &&
+          profile.settings.model !== currentSettings.model
+        ) {
+          persisted.profiles[profileId] = {
+            ...profile,
+            settings: normalizeStudioNodeLlmSettings({
+              ...profile.settings,
+              model: currentSettings.model,
+            }),
+          };
+          profilesSynced = true;
+          break; // Only sync the first matching profile
+        }
+      }
+      if (profilesSynced) {
+        writePersistedStudioNodeLlmProfiles(persisted.profiles, persisted.order);
+      }
+    }
+
+    return persisted;
+  }
+
   const profiles: Record<string, StudioNodeLlmProfile> = {};
   const order: string[] = [];
   const localOllamaProfileId = createNodeLlmProfileId();
@@ -2163,6 +2236,7 @@ function emptyState() {
     nodeLlmProbe: emptyNodeLlmProbeState(),
     nodeLlmModelCatalog: emptyNodeLlmModelCatalogState(),
     messageSuggestion: emptyMessageSuggestionState(),
+    skillSynthesis: emptySkillSynthesisState(),
     consoleEvents: [] as StudioConsoleEvent[],
     nodeModelAssignments: {} as StudioNodeModelAssignments,
     nodeModelStrategies: {} as StudioNodeModelStrategies,
@@ -3514,11 +3588,13 @@ export const useStudioStore = create<StudioState>((set, get) => ({
           settings: normalizeStudioNodeLlmSettings(state.nodeLlmSettings),
         },
       };
+      const nextOrder = state.nodeLlmProfileOrder.includes(nextProfileId)
+        ? state.nodeLlmProfileOrder
+        : [...state.nodeLlmProfileOrder, nextProfileId];
+      writePersistedStudioNodeLlmProfiles(nextProfiles, nextOrder);
       return {
         nodeLlmProfiles: nextProfiles,
-        nodeLlmProfileOrder: state.nodeLlmProfileOrder.includes(nextProfileId)
-          ? state.nodeLlmProfileOrder
-          : [...state.nodeLlmProfileOrder, nextProfileId],
+        nodeLlmProfileOrder: nextOrder,
       };
     });
     return nextProfileId;
@@ -3546,6 +3622,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       const nextProfiles = { ...state.nodeLlmProfiles };
       delete nextProfiles[profileId];
       const nextOrder = state.nodeLlmProfileOrder.filter((id) => id !== profileId);
+      writePersistedStudioNodeLlmProfiles(nextProfiles, nextOrder);
       return {
         nodeLlmProfiles: nextProfiles,
         nodeLlmProfileOrder: nextOrder,
@@ -3854,9 +3931,35 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         model,
       });
       writePersistedStudioNodeLlmSettings(nextSettings);
+
+      // Also update any profile whose settings match the current nodeLlmSettings (except model)
+      const nextProfiles = { ...state.nodeLlmProfiles };
+      let profilesChanged = false;
+      for (const profileId of state.nodeLlmProfileOrder) {
+        const profile = nextProfiles[profileId];
+        if (
+          profile &&
+          profile.settings.baseUrl === state.nodeLlmSettings.baseUrl &&
+          profile.settings.apiKey === state.nodeLlmSettings.apiKey &&
+          profile.settings.providerLabel === state.nodeLlmSettings.providerLabel
+        ) {
+          nextProfiles[profileId] = {
+            ...profile,
+            settings: normalizeStudioNodeLlmSettings({ ...profile.settings, model }),
+          };
+          profilesChanged = true;
+          break; // Only update the first matching profile
+        }
+      }
+
+      if (profilesChanged) {
+        writePersistedStudioNodeLlmProfiles(nextProfiles, state.nodeLlmProfileOrder);
+      }
+
       return {
         nodeLlmSettings: nextSettings,
         nodeLlmProbe: emptyNodeLlmProbeState(),
+        ...(profilesChanged ? { nodeLlmProfiles: nextProfiles } : {}),
       };
     }),
 
@@ -4293,6 +4396,268 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       messageSuggestion: emptyMessageSuggestionState(),
     }),
 
+  synthesizeSkill: async () => {
+    const state = get();
+    if (!state.canonicalPrompt) {
+      return;
+    }
+
+    const tags = state.canonicalPrompt.metadata.tags ?? [];
+    if (!tags.includes("url_source")) {
+      set({ skillSynthesis: { status: "failure", message: "This prompt is not an imported skill.", partialOutput: null, stage: null, compressProgress: null } });
+      return;
+    }
+
+    const prompt = state.canonicalPrompt;
+    const runtimeNodeId = getPromptRuntimeNodeId(prompt);
+    const runtimeTarget: RuntimeNodeTarget = {
+      kind: "prompt",
+      runtimeNodeId,
+      scope: { mode: "root" },
+    };
+
+    const llmSettings = resolveMessageSuggestionLlmSettings(state, runtimeTarget);
+    if (!llmSettings) {
+      set({
+        skillSynthesis: {
+          status: "failure",
+          message: "Configure a model profile or global LLM settings before synthesizing.",
+          partialOutput: null, stage: null, compressProgress: null,
+        },
+      });
+      return;
+    }
+
+    const llmClient = resolveStudioNodeLlmClient(llmSettings);
+    if (!llmClient) {
+      set({
+        skillSynthesis: {
+          status: "failure",
+          message: "LLM settings are incomplete (Base URL + model required).",
+          partialOutput: null, stage: null, compressProgress: null,
+        },
+      });
+      return;
+    }
+
+    const chunks = collectImportedSourceChunks(prompt);
+    if (chunks.length === 0) {
+      set({ skillSynthesis: { status: "failure", message: "No imported source blocks found in this prompt.", partialOutput: null, stage: null, compressProgress: null } });
+      return;
+    }
+
+    const synthesisSequence = nextSkillSynthesisSequence;
+    nextSkillSynthesisSequence += 1;
+    const isCurrent = () => synthesisSequence === nextSkillSynthesisSequence - 1;
+
+    const scopeRef = `root:${prompt.metadata.id}`;
+    const nodeLabel = prompt.metadata.title ?? prompt.metadata.id;
+    const batches = createChunkBatches(chunks);
+
+    set((current) => ({
+      skillSynthesis: {
+        status: "running",
+        message: null,
+        partialOutput: null,
+        stage: "compressing",
+        compressProgress: { done: 0, total: chunks.length },
+      },
+      consoleEvents: appendConsoleEvent(
+        current.consoleEvents,
+        createConsoleEvent({
+          status: "info",
+          category: "text",
+          message: `Starting skill synthesis for "${nodeLabel}" — Stage 1: compressing ${chunks.length} chunks in ${batches.length} batches…`,
+          scopeRef,
+          nodeId: runtimeNodeId,
+        }),
+      ),
+    }));
+
+    try {
+      // ── Stage 1: Map — compress chunks in parallel batches ──────────────
+
+      const allSummaries: CompressedChunkSummary[] = [];
+      let chunksCompressed = 0;
+
+      for (const batch of batches) {
+        if (!isCurrent()) return;
+
+        const batchExecutionId = `skill_compress_${synthesisSequence}_${Date.now()}_${chunksCompressed}`;
+        const compressMessages: LlmMessage[] = [
+          { role: "developer", content: buildChunkCompressionInstruction() },
+          { role: "user", content: buildChunkCompressionUserPrompt(batch) },
+        ];
+
+        const compressResult = await executeStudioLlmWithRemoteFallback({
+          executionId: batchExecutionId,
+          promptId: prompt.metadata.id,
+          nodeId: runtimeNodeId,
+          scope: { mode: "root" },
+          sourceSnapshotHash: `compress:${prompt.metadata.id}:${Date.now()}`,
+          mode: "text",
+          profile: { id: batchExecutionId, name: "Chunk Compression", settings: llmSettings },
+          messages: compressMessages,
+          onRemoteRecord(record) {
+            const output = typeof record.output === "string" ? record.output : "";
+            if (output.length > 0) {
+              set((current) => {
+                const prev = current.skillSynthesis.partialOutput ?? "";
+                if (output.length === prev.length) return current;
+                return { skillSynthesis: { ...current.skillSynthesis, partialOutput: output } };
+              });
+            }
+          },
+          localExecute: () =>
+            llmClient.generateText({
+              messages: compressMessages,
+              stream: true,
+              onDelta(_deltaText, aggregateText) {
+                set((current) => ({
+                  skillSynthesis: { ...current.skillSynthesis, partialOutput: aggregateText },
+                }));
+              },
+            }),
+        });
+
+        const batchSummaries = parseChunkCompressionResponse(compressResult.outputText, batch);
+        allSummaries.push(...batchSummaries);
+        chunksCompressed += batch.length;
+
+        set((current) => ({
+          skillSynthesis: {
+            ...current.skillSynthesis,
+            partialOutput: null,
+            compressProgress: { done: chunksCompressed, total: chunks.length },
+          },
+          consoleEvents: appendConsoleEvent(
+            current.consoleEvents,
+            createConsoleEvent({
+              status: "info",
+              category: "text",
+              message: `Compressed ${chunksCompressed}/${chunks.length} chunks…`,
+              scopeRef,
+              nodeId: runtimeNodeId,
+            }),
+          ),
+        }));
+      }
+
+      if (!isCurrent()) return;
+
+      // ── Stage 2: Reduce — synthesize compressed summaries into skill ────
+
+      set((current) => ({
+        skillSynthesis: {
+          ...current.skillSynthesis,
+          stage: "synthesizing",
+          partialOutput: null,
+          compressProgress: null,
+        },
+        consoleEvents: appendConsoleEvent(
+          current.consoleEvents,
+          createConsoleEvent({
+            status: "info",
+            category: "text",
+            message: `Stage 2: synthesizing ${allSummaries.length} compressed summaries into skill…`,
+            scopeRef,
+            nodeId: runtimeNodeId,
+          }),
+        ),
+      }));
+
+      const synthesisExecutionId = `skill_synthesis_${synthesisSequence}_${Date.now()}`;
+      const synthesisMessages: LlmMessage[] = [
+        { role: "developer", content: buildSkillSynthesisInstruction() },
+        { role: "user", content: buildSkillSynthesisUserPrompt(prompt, allSummaries) },
+      ];
+
+      const synthesisResult = await executeStudioLlmWithRemoteFallback({
+        executionId: synthesisExecutionId,
+        promptId: prompt.metadata.id,
+        nodeId: runtimeNodeId,
+        scope: { mode: "root" },
+        sourceSnapshotHash: `synthesis:${prompt.metadata.id}:${Date.now()}`,
+        mode: "text",
+        profile: { id: synthesisExecutionId, name: "Skill Synthesis", settings: llmSettings },
+        messages: synthesisMessages,
+        onRemoteRecord(record) {
+          const output = typeof record.output === "string" ? record.output : "";
+          if (output.length > 0) {
+            set((current) => {
+              const prev = current.skillSynthesis.partialOutput ?? "";
+              if (output.length === prev.length) return current;
+              return { skillSynthesis: { ...current.skillSynthesis, partialOutput: output } };
+            });
+          }
+        },
+        localExecute: () =>
+          llmClient.generateText({
+            messages: synthesisMessages,
+            stream: true,
+            onDelta(_deltaText, aggregateText) {
+              set((current) => ({
+                skillSynthesis: { ...current.skillSynthesis, partialOutput: aggregateText },
+              }));
+            },
+          }),
+      });
+
+      if (!isCurrent()) return;
+
+      const synthesized = parseSkillSynthesisResponse(synthesisResult.outputText, prompt);
+
+      set((s) => {
+        const hydrated = hydrateFromCanonicalPrompt(
+          synthesized,
+          s.selectedNodeId,
+          null,
+          s.canvasLayout,
+          s.mindMapNodePositions,
+          s.collapsedBlockIds,
+          [],
+          [],
+          {},
+          {},
+        );
+        const isDirty = s.savedPromptDigest ? digestPrompt(synthesized) !== s.savedPromptDigest : true;
+        return {
+          ...hydrated,
+          skillSynthesis: { status: "success" as const, message: null, partialOutput: null, stage: null, compressProgress: null },
+          isDirty,
+          importError: null,
+          syncIssues: [],
+          consoleEvents: appendConsoleEvent(
+            s.consoleEvents,
+            createConsoleEvent({
+              status: "success",
+              category: "text",
+              message: `Skill synthesis complete — "${synthesized.metadata.title}" (${synthesized.spec.blocks.length} phase${synthesized.spec.blocks.length === 1 ? "" : "s"}).`,
+              scopeRef,
+              nodeId: runtimeNodeId,
+            }),
+          ),
+        };
+      });
+    } catch (error) {
+      if (!isCurrent()) return;
+      const message = error instanceof Error ? error.message : String(error);
+      set((current) => ({
+        skillSynthesis: { status: "failure", message, partialOutput: null, stage: null, compressProgress: null },
+        consoleEvents: appendConsoleEvent(
+          current.consoleEvents,
+          createConsoleEvent({
+            status: "error",
+            category: "text",
+            message: `Skill synthesis failed: ${message}`,
+            scopeRef,
+            nodeId: runtimeNodeId,
+          }),
+        ),
+      }));
+    }
+  },
+
   recoverRemoteRuntimeForCurrentPrompt: async () => {
     const state = get();
     const prompt = state.canonicalPrompt;
@@ -4370,6 +4735,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     nextNodeResultHistorySequence = 1;
     nextMessageSuggestionSequence = 1;
     nextConsoleEventSequence = 1;
+    nextSkillSynthesisSequence = 1;
     lastPersistedCanonicalPromptKey = null;
     set(emptyState());
   },
@@ -5125,6 +5491,7 @@ export function resetStudioStoreForTests(yamlText?: string): void {
   nextNodeResultHistorySequence = 1;
   nextMessageSuggestionSequence = 1;
   nextConsoleEventSequence = 1;
+  nextSkillSynthesisSequence = 1;
   if (!yamlText) {
     useStudioStore.setState(emptyState());
     return;

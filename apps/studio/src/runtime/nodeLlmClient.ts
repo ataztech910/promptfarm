@@ -1,6 +1,7 @@
 import { createOpenAICompatibleClient, type LlmClient } from "@promptfarm/core";
 
 const STUDIO_NODE_LLM_SETTINGS_STORAGE_KEY = "promptfarm.studio.nodeLlmSettings";
+const STUDIO_NODE_LLM_PROFILES_STORAGE_KEY = "promptfarm.studio.nodeLlmProfiles";
 
 export type StudioNodeLlmSettings = {
   baseUrl: string;
@@ -111,6 +112,71 @@ export function clearPersistedStudioNodeLlmSettings(): void {
   }
 
   globalThis.localStorage.removeItem(STUDIO_NODE_LLM_SETTINGS_STORAGE_KEY);
+}
+
+// ─── Profile persistence ────────────────────────────────────────────────────
+
+type PersistedProfileEntry = {
+  id: string;
+  name: string;
+  settings: StudioNodeLlmSettings;
+};
+
+type PersistedProfilesPayload = {
+  profiles: PersistedProfileEntry[];
+};
+
+export function readPersistedStudioNodeLlmProfiles(): {
+  profiles: Record<string, StudioNodeLlmProfile>;
+  order: string[];
+} | null {
+  if (!canUseLocalStorage()) {
+    return null;
+  }
+  try {
+    const serialized = globalThis.localStorage.getItem(STUDIO_NODE_LLM_PROFILES_STORAGE_KEY);
+    if (!serialized) {
+      return null;
+    }
+    const payload = JSON.parse(serialized) as PersistedProfilesPayload;
+    if (!Array.isArray(payload.profiles) || payload.profiles.length === 0) {
+      return null;
+    }
+    const profiles: Record<string, StudioNodeLlmProfile> = {};
+    const order: string[] = [];
+    for (const entry of payload.profiles) {
+      if (!entry.id || !entry.name) continue;
+      profiles[entry.id] = {
+        id: entry.id,
+        name: entry.name,
+        settings: normalizeStudioNodeLlmSettings(entry.settings),
+      };
+      order.push(entry.id);
+    }
+    return Object.keys(profiles).length > 0 ? { profiles, order } : null;
+  } catch {
+    return null;
+  }
+}
+
+export function writePersistedStudioNodeLlmProfiles(
+  profiles: Record<string, StudioNodeLlmProfile>,
+  order: string[],
+): void {
+  if (!canUseLocalStorage()) {
+    return;
+  }
+  const entries: PersistedProfileEntry[] = order
+    .filter((id) => profiles[id])
+    .map((id) => ({
+      id: profiles[id]!.id,
+      name: profiles[id]!.name,
+      settings: normalizeStudioNodeLlmSettings(profiles[id]!.settings),
+    }));
+  globalThis.localStorage.setItem(
+    STUDIO_NODE_LLM_PROFILES_STORAGE_KEY,
+    JSON.stringify({ profiles: entries }),
+  );
 }
 
 export function getInitialStudioNodeLlmSettings(): StudioNodeLlmSettings {
@@ -254,7 +320,7 @@ export function getStudioNodeLlmPresetSettings(
         baseUrl: "http://localhost:11434/v1",
         apiKey: "",
         providerLabel: "ollama_openai",
-        model: currentSettings.model || "qwen3:14b",
+        model: currentSettings.model || "qwen3:8b",
       });
     case "openai_cloud":
       return normalizeStudioNodeLlmSettings({
