@@ -25,7 +25,8 @@ export type PromptWorkspaceBlock = {
   kind: PromptWorkspaceBlockKind;
   enabled: boolean;
   collapsed: boolean;
-  role?: "system" | "developer" | "user" | "assistant";
+  role?: string;
+  roleDescription?: string;
   label?: string;
   content?: string;
   input?: string;
@@ -77,7 +78,7 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-export function compilePromptWorkspaceBlocks(blocks: PromptWorkspaceBlock[], genericRoleOptions?: GenericRoleOption[]): PromptWorkspaceCompileResult {
+export function compilePromptWorkspaceBlocks(blocks: PromptWorkspaceBlock[]): PromptWorkspaceCompileResult {
   const activeBlocks = blocks.filter((block) => block.enabled);
   const variables: Record<string, string> = {};
 
@@ -190,10 +191,9 @@ export function compilePromptWorkspaceBlocks(blocks: PromptWorkspaceBlock[], gen
 
     const content = interpolate((block.content ?? "").trim());
     if (content.length > 0) {
-      const roleName = (block.role ?? "").trim();
-      const roleOption = genericRoleOptions?.find((r) => r.name === roleName);
-      if (roleOption) {
-        parts.push(`[Role: ${roleOption.description}]\n${content}`);
+      const desc = (block.roleDescription ?? "").trim();
+      if (desc.length > 0) {
+        parts.push(`[Role: ${desc}]\n${content}`);
       } else {
         parts.push(content);
       }

@@ -500,7 +500,10 @@ function BlockBody({ block, onUpdate, genericRoleOptions }: { block: PromptWorks
           <select
             className="h-9 w-full rounded-md border border-border/80 bg-background/70 px-3 text-sm text-foreground"
             value={block.role ?? genericRoleOptions[0]?.name ?? "developer"}
-            onChange={(e) => onUpdate({ role: e.target.value as PromptWorkspaceBlock["role"] })}
+            onChange={(e) => {
+              const selected = genericRoleOptions.find((o) => o.name === e.target.value);
+              onUpdate({ role: e.target.value, roleDescription: selected?.description ?? "" });
+            }}
           >
             {genericRoleOptions.map((opt) => (
               <option key={opt.name} value={opt.name}>{opt.name}</option>

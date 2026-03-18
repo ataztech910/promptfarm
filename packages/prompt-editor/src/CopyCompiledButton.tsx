@@ -3,11 +3,10 @@ import { Clipboard, Check } from "lucide-react";
 import { cn } from "./cn";
 import { usePromptCompiler } from "./usePromptCompiler";
 import { Button } from "./components/ui";
-import type { PromptWorkspaceBlock, GenericRoleOption } from "./promptDocumentAdapter";
+import type { PromptWorkspaceBlock } from "./promptDocumentAdapter";
 
 export type CopyCompiledButtonProps = {
   blocks: PromptWorkspaceBlock[];
-  genericRoleOptions?: GenericRoleOption[];
   className?: string;
 };
 
@@ -26,9 +25,9 @@ function copyText(text: string): void {
   document.body.removeChild(ta);
 }
 
-export function CopyCompiledButton({ blocks, genericRoleOptions, className }: CopyCompiledButtonProps) {
+export function CopyCompiledButton({ blocks, className }: CopyCompiledButtonProps) {
   const [copied, setCopied] = useState(false);
-  const { text } = usePromptCompiler(blocks, genericRoleOptions);
+  const { text } = usePromptCompiler(blocks);
 
   const handleCopy = useCallback(() => {
     if (!text) return;
