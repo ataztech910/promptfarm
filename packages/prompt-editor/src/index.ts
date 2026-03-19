@@ -7,10 +7,17 @@ export type { CompiledOutputProps } from "./components/CompiledOutput";
 export { VariablesBar } from "./components/VariablesBar";
 export type { VariablesBarProps } from "./components/VariablesBar";
 
+export { CopyButton } from "./components/CopyButton";
+export type { CopyButtonProps } from "./components/CopyButton";
+
+export { useCompiledText } from "./hooks/useCompiledText";
+
 export {
   useBlocks,
   useCompiledPrompt,
   compile,
+  compileToPromptMd,
+  parsePromptMd,
   createBlock,
   BLOCK_LABELS,
   BLOCK_DESCRIPTIONS,

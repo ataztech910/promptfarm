@@ -1,8 +1,8 @@
 # @promptfarm/prompt-editor
 
-A React component for building structured AI prompts using a block-based editor. Supports live compilation, variable interpolation, drag-and-drop reordering, and a clean dark UI out of the box.
+A React component for building structured AI prompts using a Notion-like block editor powered by TipTap. Supports live compilation to `.prompt.md` format, variable interpolation, block toggling, and a clean light UI.
 
-**Everything is built in** — the block picker modal (opens on "Add Block"), delete confirmation dialog, drag-and-drop, collapse/expand, and enable/disable toggles. No extra setup required.
+**Built-in features:** slash command menu (`/` to add blocks), drag-and-drop reordering, enable/disable toggles, structured inputs for example blocks, copy to clipboard, and a run button.
 
 ## Install
 
@@ -17,30 +17,39 @@ npm install react react-dom lucide-react
 ```tsx
 import { useState } from "react";
 import {
-  PromptBlockEditor,
-  CopyCompiledButton,
-  usePromptCompiler,
-  createPromptWorkspaceBlock,
+  PromptEditor,
+  VariablesBar,
+  CompiledOutput,
+  useCompiledText,
 } from "@promptfarm/prompt-editor";
 import "@promptfarm/prompt-editor/styles.css";
+import type { EditorSegment, Variable } from "@promptfarm/prompt-editor";
 
 export function App() {
-  const [blocks, setBlocks] = useState(() => [
-    createPromptWorkspaceBlock("prompt"),
-  ]);
+  const [segments, setSegments] = useState<EditorSegment[]>([]);
+  const [variables, setVariables] = useState<Variable[]>([]);
 
-  const compiled = usePromptCompiler(blocks);
+  const compiledText = useCompiledText(segments, variables);
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", height: "100vh" }}>
       <div style={{ display: "flex", flexDirection: "column" }}>
-        <PromptBlockEditor blocks={blocks} onChange={setBlocks} />
-        <CopyCompiledButton blocks={blocks} />
+        <VariablesBar
+          variables={variables}
+          onChange={setVariables}
+          className="border-b border-gray-200"
+        />
+        <PromptEditor
+          onChange={(_text, _blocks, segs) => setSegments(segs)}
+          className="flex-1"
+        />
       </div>
 
-      <pre style={{ padding: "1.5rem", overflowY: "auto", whiteSpace: "pre-wrap" }}>
-        {compiled.text || "← Start writing on the left"}
-      </pre>
+      <CompiledOutput
+        compiledPrompt={compiledText}
+        onRun={(prompt) => console.log("Run:", prompt)}
+        className="border-l border-gray-200"
+      />
     </div>
   );
 }
@@ -48,155 +57,220 @@ export function App() {
 
 ## Block types
 
-| Block | Description |
-|---|---|
-| `prompt` | Primary instruction text. Supports `{{variable}}` interpolation. |
-| `variables` | Named key/value pairs that are substituted across all blocks. |
-| `context` | Background info or framing. Rendered as `[Context: label]\ncontent`. |
-| `example` | Few-shot input/output pair. |
-| `output_format` | Describes the exact response structure expected from the model. |
-| `constraint` | Rules or restrictions the model must follow. |
-| `loop` | Repeats a template once for each item in a comma-separated list. |
-| `conditional` | Includes content only when a specific variable is non-empty. |
-| `metadata` | Renders a single `key: value` line into the compiled output. |
-| `generic` | Freeform block with a configurable role dropdown. Rendered as `[Role: description]\ncontent`. |
-
-## API
-
-### `<PromptBlockEditor>`
-
-```tsx
-<PromptBlockEditor
-  blocks={blocks}        // PromptWorkspaceBlock[]
-  onChange={setBlocks}   // (blocks: PromptWorkspaceBlock[]) => void
-  resetKey="prompt-1"    // optional — pass a new value to reset editor state
-  className="my-editor"  // optional — extra class on the root element
-  genericRoleOptions={[  // optional — custom roles for the generic block dropdown
-    { name: "analyst",  description: "You are an analyst, your job is to analyze data" },
-    { name: "reviewer", description: "You are a code reviewer focused on quality" },
-    { name: "editor",   description: "You are an editor improving clarity and tone" },
-  ]}
-/>
-```
-
-### `usePromptCompiler(blocks, genericRoleOptions?)`
-
-Reactively compiles blocks into a flat prompt string with variable interpolation applied.
-
-```tsx
-const { text, tokenCount, activeBlockCount } = usePromptCompiler(blocks, genericRoleOptions);
-```
-
-| Field | Type | Description |
+| Block | Slash command | Description |
 |---|---|---|
-| `text` | `string` | The compiled prompt ready to send to the model. |
-| `tokenCount` | `number` | Rough word-count estimate of the compiled text. |
-| `activeBlockCount` | `number` | Number of enabled blocks that contributed to the output. |
+| Role | `/role` | Define the AI persona |
+| Context | `/context` | Background info or framing |
+| Task | `/task` | Main instruction |
+| Example | `/example` | Few-shot input/output pair (structured: two fields) |
+| Output Format | `/output_format` | Expected response structure |
+| Constraint | `/constraint` | Rules or restrictions |
 
-### `<CopyCompiledButton>`
+## Components
 
-A standalone button that compiles the current blocks and copies the result to the clipboard. Place it anywhere in your layout.
+### `<PromptEditor>`
+
+The main TipTap-based editor. Type `/` to open the block picker menu.
 
 ```tsx
-import { CopyCompiledButton } from "@promptfarm/prompt-editor";
-
-<CopyCompiledButton
-  blocks={blocks}              // PromptWorkspaceBlock[]
-  genericRoleOptions={roles}   // optional — same roles passed to the editor
-  className="my-copy"          // optional — extra class on the button
+<PromptEditor
+  value=""               // optional — initial content
+  onChange={(text, blocks, segments) => {}}
+  className="my-editor"  // optional
 />
 ```
 
-The button is disabled when there is no compiled output. After a successful copy it shows a checkmark for 2 seconds.
+| Callback arg | Type | Description |
+|---|---|---|
+| `text` | `string` | Plain text content of the editor |
+| `blocks` | `EditorBlock[]` | All prompt blocks with kind, content, enabled state |
+| `segments` | `EditorSegment[]` | Ordered segments (text + blocks) matching document order |
 
-### `createPromptWorkspaceBlock(kind)`
+### `<CompiledOutput>`
 
-Factory that returns a fresh block with sensible defaults.
+Renders the compiled prompt with colored section headings, a copy button, and an optional run button.
+
+```tsx
+<CompiledOutput
+  compiledPrompt={compiledText}              // the compiled prompt.md string
+  onRun={(prompt) => sendToModel(prompt)}    // optional — adds a Run button
+  className="border-l border-gray-200"       // optional
+/>
+```
+
+### `<VariablesBar>`
+
+A bar for managing `{{variable}}` values. Variables are replaced in the compiled output.
+
+```tsx
+<VariablesBar
+  variables={variables}           // Variable[]
+  onChange={setVariables}          // (variables: Variable[]) => void
+  onInsert={(name) => {}}          // optional — called when a variable pill is clicked
+  className="border-b"            // optional
+/>
+```
+
+### `<CopyButton>`
+
+A standalone copy-to-clipboard button with a checkmark animation.
+
+```tsx
+import { CopyButton } from "@promptfarm/prompt-editor";
+
+<CopyButton text={compiledPrompt} />
+```
+
+## Hooks
+
+### `useCompiledText(segments, variables?)`
+
+Compiles editor segments into a `.prompt.md` formatted string with variable interpolation. Merges consecutive blocks of the same kind and handles structured fields (e.g., example input/output).
+
+```tsx
+import { useCompiledText } from "@promptfarm/prompt-editor";
+
+const compiledText = useCompiledText(segments, variables);
+```
+
+| Param | Type | Description |
+|---|---|---|
+| `segments` | `EditorSegment[]` | Ordered segments from `PromptEditor`'s `onChange` |
+| `variables` | `Variable[]` | Optional — variables to substitute `{{name}}` placeholders |
+| **returns** | `string` | Compiled prompt in `## Heading` format |
+
+## Types
+
+### `EditorBlock`
 
 ```ts
-import { createPromptWorkspaceBlock } from "@promptfarm/prompt-editor";
-
-const block = createPromptWorkspaceBlock("context");
-```
-
-### `compilePromptWorkspaceBlocks(blocks, genericRoleOptions?)`
-
-The raw compiler function — useful for server-side or non-React environments.
-
-```ts
-import { compilePromptWorkspaceBlocks } from "@promptfarm/prompt-editor";
-
-const { text } = compilePromptWorkspaceBlocks(blocks, roles);
-```
-
-### `GenericRoleOption`
-
-Type for configuring the generic block's role dropdown.
-
-```ts
-type GenericRoleOption = {
-  name: string;        // displayed in the dropdown
-  description: string; // rendered into the compiled prompt as [Role: description]
-};
-```
-
-When a generic block with role `"analyst"` is compiled, the output is:
-
-```
-[Role: You are an analyst, your job is to analyze data]
-additional instructions from the text field
-```
-
-If no `genericRoleOptions` are provided, the editor falls back to default roles: `system`, `developer`, `user`, `assistant`.
-
-## Theming
-
-Import the stylesheet and override CSS variables on `.pe-root` (or any ancestor) to adapt the colors to your app.
-
-```css
-/* Light theme example */
-.my-app .pe-root {
-  --pe-background: 0 0% 98%;
-  --pe-foreground: 222 20% 12%;
-  --pe-card: 0 0% 100%;
-  --pe-card-foreground: 222 20% 12%;
-  --pe-muted: 220 14% 94%;
-  --pe-muted-foreground: 215 12% 45%;
-  --pe-border: 220 13% 86%;
-  --pe-input: 220 13% 86%;
-  --pe-primary: 199 89% 40%;
-  --pe-primary-foreground: 0 0% 100%;
-  --pe-destructive: 0 72% 50%;
-  --pe-destructive-foreground: 0 0% 100%;
-  color-scheme: light;
+interface EditorBlock {
+  id: string;
+  kind: BlockKind;
+  content: string;
+  enabled: boolean;
+  fields?: Record<string, string>;  // structured fields (e.g., example: input/output)
 }
 ```
 
-All values are `H S% L%` (HSL without the `hsl()` wrapper) to allow Tailwind's opacity modifiers to work correctly.
-
-## Saving and loading
-
-Blocks are plain JSON — serialize them however you like.
+### `EditorSegment`
 
 ```ts
-// Save
-localStorage.setItem("prompt", JSON.stringify(blocks));
-
-// Load
-const saved = localStorage.getItem("prompt");
-const blocks = saved ? JSON.parse(saved) : [createPromptWorkspaceBlock("prompt")];
+type EditorSegment =
+  | { type: "text"; content: string }
+  | { type: "block"; block: EditorBlock };
 ```
 
-## Switching between prompts
+### `Variable`
 
-Pass a unique `resetKey` whenever you load a different prompt so the editor clears its internal UI state (open dialogs, drag state, etc.).
+```ts
+type Variable = {
+  name: string;
+  value: string;
+};
+```
 
-```tsx
-<PromptBlockEditor
-  blocks={blocks}
-  onChange={setBlocks}
-  resetKey={currentPromptId}
-/>
+### `BlockKind`
+
+```ts
+type BlockKind = "role" | "context" | "task" | "example" | "output_format" | "constraint";
+```
+
+## Core utilities (from @promptfarm/editor-core)
+
+These are re-exported from the prompt-editor package.
+
+### `compile(blocks, variables?)`
+
+Compiles blocks into a prompt string with variable interpolation.
+
+```ts
+import { compile } from "@promptfarm/prompt-editor";
+
+const { text, tokenCount, activeBlockCount } = compile(blocks, variables);
+```
+
+### `compileToPromptMd(blocks)`
+
+Compiles blocks into `.prompt.md` format with YAML frontmatter.
+
+```ts
+import { compileToPromptMd } from "@promptfarm/prompt-editor";
+
+const md = compileToPromptMd(blocks);
+// ---
+// name: You are a helpful assistant
+// description:
+// ---
+//
+// ## Role
+// You are a helpful assistant
+//
+// ## Task
+// Answer the user's question
+```
+
+### `parsePromptMd(md)`
+
+Parses a `.prompt.md` string back into blocks.
+
+```ts
+import { parsePromptMd } from "@promptfarm/prompt-editor";
+
+const blocks = parsePromptMd(fileContent);
+```
+
+### `createBlock(kind)`
+
+Factory that returns a fresh block with a unique ID.
+
+```ts
+import { createBlock } from "@promptfarm/prompt-editor";
+
+const block = createBlock("context");
+```
+
+## Compiled output format
+
+The compiled prompt uses markdown headings with block colors preserved in the UI:
+
+```
+## Role
+You are a helpful assistant
+
+## Context
+The user is building a web app
+
+## Task
+Help them debug their CSS
+
+## Example
+Input: my div won't center
+Output: Use flexbox: display: flex; justify-content: center; align-items: center;
+```
+
+## Theming
+
+Import the stylesheet. The editor uses a light theme by default. Override styles on `.pe-root`:
+
+```css
+.pe-root {
+  color-scheme: light;
+  font-family: "IBM Plex Sans", "Inter", ui-sans-serif, system-ui, sans-serif;
+}
+```
+
+Block colors are defined in `BLOCK_COLORS` and can be accessed for custom rendering:
+
+```ts
+import { BLOCK_COLORS, BLOCK_LABELS } from "@promptfarm/prompt-editor";
+
+BLOCK_COLORS.role      // "#7F77DD"
+BLOCK_COLORS.context   // "#1D9E75"
+BLOCK_COLORS.task      // "#378ADD"
+BLOCK_COLORS.example   // "#D4537E"
+BLOCK_COLORS.output_format // "#EF9F27"
+BLOCK_COLORS.constraint    // "#E24B4A"
 ```
 
 ## License

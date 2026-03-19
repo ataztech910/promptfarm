@@ -35,3 +35,15 @@ export function compile(blocks: Block[], variables: Variable[] = []): CompileRes
 
   return { text, tokenCount, activeBlockCount };
 }
+
+export function compileToPromptMd(blocks: Block[]): string {
+  const active = blocks.filter((b) => b.enabled && b.content.trim());
+  const firstName = active[0]?.content.trim().slice(0, 50) || "untitled";
+
+  const frontmatter = `---\nname: ${firstName}\ndescription: \n---`;
+  const sections = active.map(
+    (b) => `## ${BLOCK_LABELS[b.kind]}\n${b.content.trim()}`,
+  );
+
+  return [frontmatter, "", ...sections].join("\n\n");
+}

@@ -25,6 +25,7 @@ function ExampleFields({ fields, onChange }: { fields: Record<string, string>; o
           value={fields.input ?? ""}
           onChange={(e) => onChange({ ...fields, input: e.target.value })}
           placeholder="Example input…"
+          autoFocus
           rows={2}
           className="w-full resize-y rounded border border-gray-200 bg-gray-50 px-2.5 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:border-gray-300 focus:outline-none"
         />
@@ -65,6 +66,7 @@ function BlockView({ node, updateAttributes, deleteNode, editor }: any) {
     <NodeViewWrapper
       className={cn("group relative", !enabled && "opacity-40")}
       style={{ borderLeft: `4px solid ${color}` }}
+      data-block-id={node.attrs.blockId}
     >
       <div className="flex items-start">
         {/* Drag handle */}

@@ -11,5 +11,6 @@ export default defineConfig({
   clean: true,
   outDir: "dist",
   external: ["react", "react-dom", "lucide-react"],
+  noExternal: ["@promptfarm/editor-core"],
   jsx: "react-jsx",
 });

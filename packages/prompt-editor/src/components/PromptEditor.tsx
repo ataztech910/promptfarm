@@ -119,11 +119,20 @@ export function PromptEditor({ value, onChange, className }: PromptEditorProps) 
         editor.chain().focus().deleteRange({ from: deleteFrom, to: from }).run();
       }
       // Insert promptBlock node
+      const blockId = crypto.randomUUID();
       editor.chain().focus().insertContent({
         type: "promptBlock",
-        attrs: { kind, blockId: crypto.randomUUID(), enabled: true },
+        attrs: { kind, blockId, enabled: true },
       }).run();
       setMenu(null);
+
+      // For structured blocks (example), focus the first textarea
+      if (kind === "example") {
+        requestAnimationFrame(() => {
+          const el = editor.view.dom.querySelector(`[data-block-id="${blockId}"] textarea`) as HTMLTextAreaElement | null;
+          el?.focus();
+        });
+      }
     },
     [editor],
   );
