@@ -1,13 +1,27 @@
-export { PromptBlockEditor } from "./PromptBlockEditor";
-export type { PromptBlockEditorProps } from "./PromptBlockEditor";
-export { CopyCompiledButton } from "./CopyCompiledButton";
-export type { CopyCompiledButtonProps } from "./CopyCompiledButton";
-export { usePromptCompiler } from "./usePromptCompiler";
-export { compilePromptWorkspaceBlocks, createPromptWorkspaceBlock } from "./promptDocumentAdapter";
+// Re-export editor-core logic
+export {
+  useBlocks,
+  useCompiledPrompt,
+  compile,
+  createBlock,
+  BLOCK_LABELS,
+  BLOCK_DESCRIPTIONS,
+  BLOCK_COLORS,
+  BLOCK_KINDS,
+} from "@promptfarm/editor-core";
 export type {
-  PromptWorkspaceBlock,
-  PromptWorkspaceBlockKind,
-  PromptWorkspaceVariableEntry,
-  PromptWorkspaceCompileResult,
-  GenericRoleOption,
-} from "./promptDocumentAdapter";
+  Block,
+  BlockKind,
+  Variable,
+  CompileResult,
+} from "@promptfarm/editor-core";
+
+// React components
+export { PromptEditor } from "./components/PromptEditor";
+export type { PromptEditorProps } from "./components/PromptEditor";
+
+export { CompiledOutput } from "./components/CompiledOutput";
+export type { CompiledOutputProps } from "./components/CompiledOutput";
+
+export { VariablesBar } from "./components/VariablesBar";
+export type { VariablesBarProps } from "./components/VariablesBar";

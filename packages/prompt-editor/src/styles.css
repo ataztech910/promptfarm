@@ -1,71 +1,49 @@
 @import "tailwindcss/theme";
 @import "tailwindcss/utilities";
 
-@theme inline {
-  --color-background: hsl(var(--pe-background));
-  --color-foreground: hsl(var(--pe-foreground));
-  --color-card: hsl(var(--pe-card));
-  --color-card-foreground: hsl(var(--pe-card-foreground));
-  --color-popover: hsl(var(--pe-popover));
-  --color-popover-foreground: hsl(var(--pe-popover-foreground));
-  --color-primary: hsl(var(--pe-primary));
-  --color-primary-foreground: hsl(var(--pe-primary-foreground));
-  --color-secondary: hsl(var(--pe-secondary));
-  --color-secondary-foreground: hsl(var(--pe-secondary-foreground));
-  --color-muted: hsl(var(--pe-muted));
-  --color-muted-foreground: hsl(var(--pe-muted-foreground));
-  --color-accent: hsl(var(--pe-accent));
-  --color-accent-foreground: hsl(var(--pe-accent-foreground));
-  --color-destructive: hsl(var(--pe-destructive));
-  --color-destructive-foreground: hsl(var(--pe-destructive-foreground));
-  --color-border: hsl(var(--pe-border));
-  --color-input: hsl(var(--pe-input));
-  --color-ring: hsl(var(--pe-ring));
-}
+/* ── Light theme ─────────────────────────────────────── */
 
-/* Default dark theme — override any of these CSS variables to customise */
 .pe-root {
-  --pe-background: 222 20% 8%;
-  --pe-foreground: 210 20% 92%;
-
-  --pe-card: 222 18% 11%;
-  --pe-card-foreground: 210 20% 92%;
-
-  --pe-popover: 222 18% 11%;
-  --pe-popover-foreground: 210 20% 92%;
-
-  --pe-primary: 199 89% 58%;
-  --pe-primary-foreground: 224 30% 10%;
-
-  --pe-secondary: 223 16% 18%;
-  --pe-secondary-foreground: 210 20% 92%;
-
-  --pe-muted: 223 14% 16%;
-  --pe-muted-foreground: 215 12% 66%;
-
-  --pe-accent: 198 76% 44%;
-  --pe-accent-foreground: 210 20% 92%;
-
-  --pe-destructive: 0 63% 40%;
-  --pe-destructive-foreground: 210 20% 92%;
-
-  --pe-border: 219 13% 22%;
-  --pe-input: 219 13% 22%;
-  --pe-ring: 199 89% 58%;
-
-  color-scheme: dark;
+  color-scheme: light;
   font-family: "IBM Plex Sans", "Inter", ui-sans-serif, system-ui, sans-serif;
+  color: #1f2937;
 }
 
 .pe-root *,
 .pe-root *::before,
 .pe-root *::after {
-  border-color: hsl(var(--pe-border));
   box-sizing: border-box;
 }
 
 .pe-root code,
 .pe-root pre,
-.pe-root textarea {
+.pe-root textarea,
+.pe-root [contenteditable] {
   font-family: "IBM Plex Mono", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* ── Variable highlights ─────────────────────────────── */
+
+.pe-var-known {
+  background: rgba(139, 92, 246, 0.12);
+  color: #7c3aed;
+  border-radius: 3px;
+  padding: 0 2px;
+}
+
+.pe-var-unknown {
+  background: rgba(245, 158, 11, 0.12);
+  color: #d97706;
+  border-radius: 3px;
+  padding: 0 2px;
+}
+
+/* ── TipTap editor reset ─────────────────────────────── */
+
+.pe-root .tiptap {
+  outline: none;
+}
+
+.pe-root .tiptap > div[data-prompt-block] {
+  margin-bottom: 0.75rem;
 }

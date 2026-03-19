@@ -17,6 +17,7 @@
   "scripts": {
     "build": "tsup && node_modules/.bin/tailwindcss -i ./src/styles.css -o ./dist/styles.css",
     "dev": "tsup --watch",
+    "dev:example": "cd example && npx vite",
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
@@ -25,6 +26,15 @@
     "react-dom": "^18.0.0"
   },
   "dependencies": {
+    "@promptfarm/editor-core": "file:../editor-core",
+    "@tiptap/core": "^2.27.2",
+    "@tiptap/extension-document": "^2.27.2",
+    "@tiptap/extension-dropcursor": "^2.27.2",
+    "@tiptap/extension-history": "^2.27.2",
+    "@tiptap/extension-text": "^2.27.2",
+    "@tiptap/pm": "^2.27.2",
+    "@tiptap/react": "^2.27.2",
+    "@tiptap/suggestion": "^2.27.2",
     "clsx": "^2.1.1",
     "tailwind-merge": "^3.5.0"
   },
@@ -33,9 +43,11 @@
     "@tailwindcss/vite": "^4.2.1",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
     "tailwindcss": "^4.2.1",
     "tsup": "^8.5.1",
-    "typescript": "^5.5.0"
+    "typescript": "^5.5.0",
+    "vite": "^6.3.5"
   },
   "license": "MIT"
 }
