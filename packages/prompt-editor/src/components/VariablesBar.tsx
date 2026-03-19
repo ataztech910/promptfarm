@@ -28,7 +28,7 @@ export function VariablesBar({ variables, onChange, onInsert, className }: Varia
   }
 
   return (
-    <div className={cn("flex items-center gap-2 px-5 py-2.5", className)}>
+    <div className={cn("flex items-center gap-2 bg-white px-5 py-2.5", className)}>
       <span className="text-xs font-medium text-gray-400">Variables</span>
 
       <div className="flex flex-wrap items-center gap-1.5">

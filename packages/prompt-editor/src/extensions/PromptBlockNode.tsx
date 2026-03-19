@@ -14,6 +14,37 @@ export function generateBlockId() {
     : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/* ── Structured fields for special block types ───────── */
+
+function ExampleFields({ fields, onChange }: { fields: Record<string, string>; onChange: (f: Record<string, string>) => void }) {
+  return (
+    <div className="space-y-2" contentEditable={false}>
+      <div>
+        <label className="mb-0.5 block text-[11px] font-medium text-gray-400">Input</label>
+        <textarea
+          value={fields.input ?? ""}
+          onChange={(e) => onChange({ ...fields, input: e.target.value })}
+          placeholder="Example input…"
+          rows={2}
+          className="w-full resize-y rounded border border-gray-200 bg-gray-50 px-2.5 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:border-gray-300 focus:outline-none"
+        />
+      </div>
+      <div>
+        <label className="mb-0.5 block text-[11px] font-medium text-gray-400">Output</label>
+        <textarea
+          value={fields.output ?? ""}
+          onChange={(e) => onChange({ ...fields, output: e.target.value })}
+          placeholder="Expected output…"
+          rows={2}
+          className="w-full resize-y rounded border border-gray-200 bg-gray-50 px-2.5 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:border-gray-300 focus:outline-none"
+        />
+      </div>
+    </div>
+  );
+}
+
+const STRUCTURED_KINDS = new Set(["example"]);
+
 /* ── React node view ─────────────────────────────────── */
 
 function BlockView({ node, updateAttributes, deleteNode, editor }: any) {
@@ -118,14 +149,21 @@ function BlockView({ node, updateAttributes, deleteNode, editor }: any) {
           </div>
 
           {/* Editable content + placeholder */}
-          <div className="relative">
-            <NodeViewContent className="text-sm leading-relaxed text-gray-900" style={{ minHeight: "1.5em", outline: "none" }} />
-            {placeholder && (
-              <span className="pointer-events-none absolute left-0 top-0 text-sm text-gray-400">
-                {placeholder}
-              </span>
-            )}
-          </div>
+          {STRUCTURED_KINDS.has(kind) ? (
+            <ExampleFields
+              fields={node.attrs.fields ?? {}}
+              onChange={(f) => updateAttributes({ fields: f })}
+            />
+          ) : (
+            <div className="relative">
+              <NodeViewContent className="text-sm leading-relaxed text-gray-900" style={{ minHeight: "1.5em", outline: "none" }} />
+              {placeholder && (
+                <span className="pointer-events-none absolute left-0 top-0 text-sm text-gray-400">
+                  {placeholder}
+                </span>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </NodeViewWrapper>
@@ -145,6 +183,7 @@ export const PromptBlockNode = Node.create({
       kind: { default: "task" },
       blockId: { default: null },
       enabled: { default: true },
+      fields: { default: {} },
     };
   },
 

@@ -4,9 +4,7 @@ export type BlockKind =
   | "task"
   | "example"
   | "output_format"
-  | "constraint"
-  | "loop"
-  | "conditional";
+  | "constraint";
 
 export type Block = {
   id: string;
@@ -28,8 +26,6 @@ export const BLOCK_LABELS: Record<BlockKind, string> = {
   example: "Example",
   output_format: "Output Format",
   constraint: "Constraint",
-  loop: "Loop",
-  conditional: "Conditional",
 };
 
 export const BLOCK_DESCRIPTIONS: Record<BlockKind, string> = {
@@ -39,8 +35,6 @@ export const BLOCK_DESCRIPTIONS: Record<BlockKind, string> = {
   example: "Few-shot example",
   output_format: "Expected response structure",
   constraint: "Rules or restrictions",
-  loop: "Repeat over a list",
-  conditional: "Include if variable exists",
 };
 
 export const BLOCK_COLORS: Record<BlockKind, string> = {
@@ -50,8 +44,6 @@ export const BLOCK_COLORS: Record<BlockKind, string> = {
   example: "#D4537E",
   output_format: "#EF9F27",
   constraint: "#E24B4A",
-  loop: "#888780",
-  conditional: "#888780",
 };
 
 export const BLOCK_KINDS: BlockKind[] = [
@@ -61,8 +53,6 @@ export const BLOCK_KINDS: BlockKind[] = [
   "example",
   "output_format",
   "constraint",
-  "loop",
-  "conditional",
 ];
 
 export function createBlock(kind: BlockKind): Block {

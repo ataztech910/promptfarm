@@ -1,7 +1,7 @@
-import { useState, useMemo, StrictMode } from "react";
+import { useState, useMemo, useRef, StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { PromptEditor, BLOCK_LABELS, BLOCK_COLORS } from "../src";
-import type { EditorSegment, BlockKind } from "../src";
+import { PromptEditor, VariablesBar, BLOCK_LABELS, BLOCK_COLORS } from "../src";
+import type { EditorSegment, BlockKind, Variable } from "../src";
 import "./styles.css";
 
 const BLOCK_TEMPLATES: Record<string, (content: string) => string> = {
@@ -11,13 +11,11 @@ const BLOCK_TEMPLATES: Record<string, (content: string) => string> = {
   example: (c) => `[Example]\nInput/Output:\n${c}`,
   output_format: (c) => `[Output format: ${c}]`,
   constraint: (c) => `[Constraint: ${c}]`,
-  loop: (c) => `[For each item: ${c}]`,
-  conditional: (c) => `[If applicable: ${c}]`,
 };
 
 type MergedSegment =
   | { type: "text"; content: string; key: string }
-  | { type: "block"; kind: BlockKind; content: string; enabled: boolean; key: string };
+  | { type: "block"; kind: BlockKind; content: string; enabled: boolean; key: string; fields?: Record<string, string> };
 
 /** Merge consecutive blocks of the same kind into one segment */
 function mergeSegments(segments: EditorSegment[]): MergedSegment[] {
@@ -31,22 +29,37 @@ function mergeSegments(segments: EditorSegment[]): MergedSegment[] {
       if (prev && prev.type === "block" && prev.kind === b.kind && prev.enabled === b.enabled) {
         prev.content += "\n" + b.content;
       } else {
-        merged.push({ type: "block", kind: b.kind, content: b.content, enabled: b.enabled, key: b.id });
+        merged.push({ type: "block", kind: b.kind, content: b.content, enabled: b.enabled, key: b.id, fields: b.fields });
       }
     }
   }
   return merged;
 }
 
+function replaceVars(text: string, vars: Variable[]): string {
+  return vars.reduce((t, v) => v.value ? t.replaceAll(`{{${v.name}}}`, v.value) : t, text);
+}
+
 function App() {
   const [segments, setSegments] = useState<EditorSegment[]>([]);
+  const [variables, setVariables] = useState<Variable[]>([]);
+  const editorRef = useRef<{ insertText: (text: string) => void }>(null);
   const merged = useMemo(() => mergeSegments(segments), [segments]);
 
   return (
     <div className="grid h-screen grid-cols-2">
-      <PromptEditor
-        onChange={(_t, _b, segs) => { setSegments(segs); }}
-      />
+      <div className="flex h-full flex-col">
+        <VariablesBar
+          variables={variables}
+          onChange={setVariables}
+          onInsert={(name) => editorRef.current?.insertText(`{{${name}}}`)}
+          className="border-b border-gray-200"
+        />
+        <PromptEditor
+          onChange={(_t, _b, segs) => { setSegments(segs); }}
+          className="flex-1"
+        />
+      </div>
       <div className="overflow-auto border-l border-gray-200 bg-gray-50 px-8 py-6">
         <h2 className="mb-4 text-xs font-semibold uppercase tracking-wider text-gray-400">
           Compiled Prompt
@@ -57,11 +70,22 @@ function App() {
               if (seg.type === "text") {
                 return (
                   <pre key={seg.key} className="whitespace-pre-wrap font-mono text-sm text-gray-800">
-                    {seg.content}
+                    {replaceVars(seg.content, variables)}
                   </pre>
                 );
               }
-              if (!seg.enabled || !seg.content.trim()) return null;
+              const hasFields = seg.fields && Object.values(seg.fields).some((v) => v.trim());
+              if (!seg.enabled || (!seg.content.trim() && !hasFields)) return null;
+
+              let compiled: string;
+              if (seg.kind === "example" && seg.fields) {
+                const inp = seg.fields.input?.trim() ?? "";
+                const out = seg.fields.output?.trim() ?? "";
+                compiled = `[Example]\nInput: ${inp}\nOutput: ${out}`;
+              } else {
+                compiled = BLOCK_TEMPLATES[seg.kind]?.(seg.content.trim()) ?? seg.content.trim();
+              }
+
               return (
                 <div key={seg.key}>
                   <div
@@ -71,7 +95,7 @@ function App() {
                     {BLOCK_LABELS[seg.kind]}
                   </div>
                   <pre className="whitespace-pre-wrap font-mono text-sm text-gray-800">
-                    {BLOCK_TEMPLATES[seg.kind]?.(seg.content.trim()) ?? seg.content.trim()}
+                    {replaceVars(compiled, variables)}
                   </pre>
                 </div>
               );

@@ -12,6 +12,7 @@ export interface EditorBlock {
   kind: BlockKind;
   content: string;
   enabled: boolean;
+  fields?: Record<string, string>;
 }
 
 export type EditorSegment =
@@ -58,11 +59,15 @@ export function PromptEditor({ value, onChange, className }: PromptEditorProps) 
         const to = offset + node.nodeSize - 1;
         const text = to > from ? doc.textBetween(from, to, "\n", "\n") : "";
         if (node.type.name === "promptBlock") {
+          const fields = node.attrs.fields && Object.keys(node.attrs.fields).length > 0
+            ? node.attrs.fields
+            : undefined;
           const block: EditorBlock = {
             id: node.attrs.blockId ?? crypto.randomUUID(),
             kind: node.attrs.kind,
             content: text,
             enabled: node.attrs.enabled,
+            fields,
           };
           blocks.push(block);
           segments.push({ type: "block", block });
