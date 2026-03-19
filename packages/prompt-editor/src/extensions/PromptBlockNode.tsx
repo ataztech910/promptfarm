@@ -119,7 +119,7 @@ function BlockView({ node, updateAttributes, deleteNode, editor }: any) {
 
           {/* Editable content + placeholder */}
           <div className="relative">
-            <NodeViewContent className="min-h-[1.5em] text-sm leading-relaxed text-gray-900 outline-none" />
+            <NodeViewContent className="text-sm leading-relaxed text-gray-900" style={{ minHeight: "1.5em", outline: "none" }} />
             {placeholder && (
               <span className="pointer-events-none absolute left-0 top-0 text-sm text-gray-400">
                 {placeholder}
@@ -180,7 +180,7 @@ export const PromptBlockNode = Node.create({
             if (node?.type.name === "promptBlock") {
               tr.setNodeMarkup(pos, undefined, {
                 ...node.attrs,
-                kind: atEnd ? "task" : node.attrs.kind,
+                kind: node.attrs.kind,
                 blockId: generateBlockId(),
               });
             }

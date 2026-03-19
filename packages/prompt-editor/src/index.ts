@@ -1,4 +1,12 @@
-// Re-export editor-core logic
+export { PromptEditor } from "./components/PromptEditor";
+export type { PromptEditorProps, EditorBlock, EditorSegment } from "./components/PromptEditor";
+
+export { CompiledOutput } from "./components/CompiledOutput";
+export type { CompiledOutputProps } from "./components/CompiledOutput";
+
+export { VariablesBar } from "./components/VariablesBar";
+export type { VariablesBarProps } from "./components/VariablesBar";
+
 export {
   useBlocks,
   useCompiledPrompt,
@@ -15,13 +23,3 @@ export type {
   Variable,
   CompileResult,
 } from "@promptfarm/editor-core";
-
-// React components
-export { PromptEditor } from "./components/PromptEditor";
-export type { PromptEditorProps } from "./components/PromptEditor";
-
-export { CompiledOutput } from "./components/CompiledOutput";
-export type { CompiledOutputProps } from "./components/CompiledOutput";
-
-export { VariablesBar } from "./components/VariablesBar";
-export type { VariablesBarProps } from "./components/VariablesBar";

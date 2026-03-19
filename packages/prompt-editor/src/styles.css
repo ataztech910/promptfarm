@@ -40,6 +40,13 @@
 
 /* ── TipTap editor reset ─────────────────────────────── */
 
+/* Height chain: wrapper → EditorContent div → .tiptap */
+.pe-root .tiptap-wrapper,
+.pe-root .tiptap-wrapper > div,
+.pe-root .tiptap {
+  min-height: 100%;
+}
+
 .pe-root .tiptap {
   outline: none;
 }
