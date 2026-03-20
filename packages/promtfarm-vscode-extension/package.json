@@ -1,0 +1,53 @@
+{
+  "name": "promptfarm-vscode",
+  "displayName": "Propmt Rainbow",
+  "description": "Syntax decorations and preview for .prompt.md files",
+  "version": "0.1.0",
+  "publisher": "AndreiTazetdinov",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/promptfarm/promptfarm"
+  },
+  "icon": "icon.png",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Programming Languages", "Visualization"],
+  "activationEvents": [
+    "onLanguage:markdown",
+    "workspaceContains:**/*.prompt.md",
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "promptfarm.openPreview",
+        "title": "Prompt: Open Preview"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "when": "resourceFilename =~ /\\.prompt\\.md$/",
+          "command": "promptfarm.openPreview",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "package": "vsce package --no-dependencies"
+  },
+  "dependencies": {
+    "@promptfarm/editor-core": "file:../editor-core"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.5.0"
+  }
+}
