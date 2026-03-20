@@ -1,15 +1,7 @@
 import * as vscode from "vscode";
 import { parsePromptMd, compile, BLOCK_COLORS, BLOCK_LABELS } from "@promptfarm/editor-core";
-import type { BlockKind } from "@promptfarm/editor-core";
-
-const HEADING_COLORS: Record<string, string> = {
-  "Role": BLOCK_COLORS.role,
-  "Context": BLOCK_COLORS.context,
-  "Task": BLOCK_COLORS.task,
-  "Example": BLOCK_COLORS.example,
-  "Output Format": BLOCK_COLORS.output_format,
-  "Constraint": BLOCK_COLORS.constraint,
-};
+import type { Variable } from "@promptfarm/editor-core";
+import { ShadowDoc } from "./shadow-doc";
 
 let panel: vscode.WebviewPanel | undefined;
 let changeListener: vscode.Disposable | undefined;
@@ -17,8 +9,8 @@ let editorListener: vscode.Disposable | undefined;
 
 export function openPreview(context: vscode.ExtensionContext) {
   const editor = vscode.window.activeTextEditor;
-  if (!editor || !editor.document.fileName.endsWith(".prompt.md")) {
-    vscode.window.showWarningMessage("Open a .prompt.md file first");
+  if (!editor || !editor.document.fileName.endsWith(".md")) {
+    vscode.window.showWarningMessage("Open a .md file first");
     return;
   }
 
@@ -43,14 +35,14 @@ export function openPreview(context: vscode.ExtensionContext) {
 
   // Live update on text change
   changeListener = vscode.workspace.onDidChangeTextDocument((e) => {
-    if (e.document.fileName.endsWith(".prompt.md")) {
+    if (e.document.fileName.endsWith(".md")) {
       updatePreview(e.document);
     }
   });
 
   // Update when switching editors
   editorListener = vscode.window.onDidChangeActiveTextEditor((ed) => {
-    if (ed && ed.document.fileName.endsWith(".prompt.md")) {
+    if (ed && ed.document.fileName.endsWith(".md")) {
       updatePreview(ed.document);
     }
   });
@@ -63,15 +55,22 @@ function updatePreview(document: vscode.TextDocument) {
 
   const text = document.getText();
   const blocks = parsePromptMd(text);
-  const result = compile(blocks);
+
+  // Parse variables from frontmatter using ShadowDoc (same logic as editor annotations)
+  const shadow = new ShadowDoc();
+  shadow.parse(document);
+  const variables: Variable[] = Object.entries(shadow.variables).map(([name, value]) => ({ name, value }));
+
+  const result = compile(blocks, variables);
 
   const sectionsHtml = blocks
     .filter((b) => b.enabled && b.content.trim())
     .map((b) => {
       const label = BLOCK_LABELS[b.kind];
       const color = BLOCK_COLORS[b.kind];
-      const escaped = escapeHtml(b.content.trim())
-        .replace(/\{\{(\w+)\}\}/g, '<span class="variable">{{$1}}</span>');
+      const varMap: Record<string, string> = {};
+      for (const v of variables) varMap[v.name] = v.value;
+      const escaped = formatContent(escapeHtml(b.content.trim()), varMap);
       return `
         <div class="section" style="border-left: 4px solid ${color};">
           <h2 style="color: ${color};">${label}</h2>
@@ -83,6 +82,28 @@ function updatePreview(document: vscode.TextDocument) {
   const compiledEscaped = escapeHtml(result.text);
 
   panel.webview.html = getHtml(sectionsHtml, compiledEscaped, result.tokenCount, result.activeBlockCount);
+}
+
+/** Format content: resolve variables and render code blocks */
+function formatContent(escaped: string, varMap: Record<string, string>): string {
+  // Resolve variables
+  let result = escaped.replace(/\{\{(\w+)\}\}/g, (_, key) => {
+    const val = varMap[key];
+    return val
+      ? `<span class="variable" title="{{${key}}}">${escapeHtml(val)}</span>`
+      : `<span class="variable">{{${key}}}</span>`;
+  });
+
+  // Render fenced code blocks: ```lang ... ```
+  result = result.replace(
+    /```(\w*)\n([\s\S]*?)```/g,
+    (_, lang, code) => {
+      const badge = lang ? `<span class="code-lang">${lang}</span>` : "";
+      return `${badge}<code class="code-block">${code.trimEnd()}</code>`;
+    },
+  );
+
+  return result;
 }
 
 function escapeHtml(text: string): string {
@@ -152,6 +173,28 @@ function getHtml(sectionsHtml: string, compiledText: string, tokenCount: number,
     padding: 1px 4px;
     border-radius: 3px;
     border: 1px solid rgba(127, 119, 221, 0.3);
+  }
+  .code-block {
+    display: block;
+    background: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 4px;
+    padding: 10px 12px;
+    margin: 6px 0;
+    font-family: 'Menlo', 'Consolas', monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    color: #d4d4d4;
+    overflow-x: auto;
+    white-space: pre;
+  }
+  .code-lang {
+    display: inline-block;
+    font-size: 10px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-top: 6px;
   }
   .divider {
     border: none;
@@ -224,7 +267,7 @@ export function handleWebviewMessage(context: vscode.ExtensionContext) {
     async (message) => {
       if (message.type === "copy") {
         const editor = vscode.window.activeTextEditor;
-        if (editor && editor.document.fileName.endsWith(".prompt.md")) {
+        if (editor && editor.document.fileName.endsWith(".md")) {
           const text = editor.document.getText();
           const blocks = parsePromptMd(text);
           const result = compile(blocks);

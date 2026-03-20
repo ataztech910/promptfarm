@@ -54,8 +54,6 @@ export function clearDecorations() {
 /** Apply decorations based on shadow doc sections — no dispose/recreate flicker */
 export function applyDecorations(editor: vscode.TextEditor, shadow: ShadowDoc) {
   const doc = editor.document;
-  if (!doc.fileName.endsWith(".prompt.md")) return;
-
   const lines = doc.getText().split("\n");
 
   // ── Section decorations from shadow ──

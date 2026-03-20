@@ -1,8 +1,8 @@
 {
   "name": "promptfarm-vscode",
-  "displayName": "Propmt Rainbow",
+  "displayName": "Prompt Rainbow",
   "description": "Syntax decorations and preview for .prompt.md files",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "publisher": "AndreiTazetdinov",
   "license": "MIT",
   "repository": {
@@ -13,7 +13,10 @@
   "engines": {
     "vscode": "^1.85.0"
   },
-  "categories": ["Programming Languages", "Visualization"],
+  "categories": [
+    "Programming Languages",
+    "Visualization"
+  ],
   "activationEvents": [
     "onLanguage:markdown",
     "workspaceContains:**/*.prompt.md",
@@ -25,12 +28,16 @@
       {
         "command": "promptfarm.openPreview",
         "title": "Prompt: Open Preview"
+      },
+      {
+        "command": "promptfarm.toggleHighlight",
+        "title": "Prompt Rainbow: Toggle Highlighting"
       }
     ],
     "menus": {
       "editor/title": [
         {
-          "when": "resourceFilename =~ /\\.prompt\\.md$/",
+          "when": "resourceFilename =~ /\\.md$/",
           "command": "promptfarm.openPreview",
           "group": "navigation"
         }

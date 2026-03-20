@@ -13,7 +13,7 @@ const HEADING_COLORS: Record<string, string> = {
 const FALLBACK_COLOR = "#6B7280";
 const FRONTMATTER_COLOR = "#D4A017"; // gold
 const HEADING_RE = /^## (.+)$/;
-const FRONTMATTER_FENCE = /^---\s*$/;
+const FRONTMATTER_FENCE = /^\s*---\s*$/;
 
 // ── Types ──────────────────────────────────────────────
 
@@ -188,6 +188,12 @@ export class ShadowDoc {
   ): void {
     const section = this.sectionAt(line);
 
+    // If inside frontmatter, re-parse
+    if (section?.kind === "__frontmatter__") {
+      this.parse(doc);
+      return;
+    }
+
     if (section) {
       const lineText = doc.lineAt(line).text;
       const charAfterCursor = lineText.substring(change.range.start.character).trim();
@@ -266,6 +272,15 @@ export class ShadowDoc {
   // ── Typing ──
 
   private handleTyping(doc: vscode.TextDocument, line: number): void {
+    // If editing inside a frontmatter block, re-parse everything
+    const fmSection = this.sections.find(
+      (s) => s.kind === "__frontmatter__" && line >= s.headingLine && line <= s.endLine,
+    );
+    if (fmSection) {
+      this.parse(doc);
+      return;
+    }
+
     const lines = doc.getText().split("\n");
     const lineText = lines[line] ?? "";
 
