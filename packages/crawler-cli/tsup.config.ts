@@ -10,5 +10,5 @@ export default defineConfig({
   sourcemap: true,
   clean: true,
   outDir: "dist",
-  noExternal: ["@promptfarm/core", "@promptfarm/crawler-core"]
+  noExternal: ["@promptfarm/crawler-core"],
 });

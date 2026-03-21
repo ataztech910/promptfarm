@@ -4,9 +4,15 @@
     "baseUrl": ".",
     "paths": {
       "@promptfarm/core": ["packages/core/src/index.ts"],
-      "@promptfarm/core/node": ["packages/core/src/node.ts"]
+      "@promptfarm/core/node": ["packages/core/src/node.ts"],
+      "@promptfarm/crawler-core": ["packages/crawler-core/src/index.ts"]
     }
   },
-  "include": ["packages/core/src/**/*.ts", "packages/cli/src/**/*.ts"],
+  "include": [
+    "packages/core/src/**/*.ts",
+    "packages/cli/src/**/*.ts",
+    "packages/crawler-core/src/**/*.ts",
+    "packages/crawler-cli/src/**/*.ts"
+  ],
   "exclude": ["apps/studio", "dist", "node_modules"]
 }

@@ -1,0 +1,25 @@
+name: fortnite-curated
+entryUrl: https://dev.epicgames.com/documentation/en-us/fortnite/programming-with-verse-in-unreal-editor-for-fortnite
+scope: section
+requestDelayMs: 500
+maxPages: 100
+loader: playwright
+playwrightSessionMode: multiple
+outputDir: ./artifacts/fortnite-curated
+includePatterns:
+  - /documentation\/en-us\/fortnite\//
+excludePatterns:
+  - /verse-api/
+  - /\/documentation\/en-us\/fortnite\/release-notes(?:\/|$)/
+  - /release-notes/
+  - /ecosystem-updates-and-release-notes/
+  - /whats-new-in-unreal-editor-for-fortnite/
+  - /fortnite-glossary/
+  - /verse-glossary/
+  - /fortnite-creative-video-tutorials/
+  - /star-wars-islands/
+  - /kpop-demon-hunters-islands/
+  - /teenage-mutant-ninja-turtle-islands/
+  - /the-walking-dead-universe-islands/
+  - /squid-game-islands/
+  - /building-lego-islands/

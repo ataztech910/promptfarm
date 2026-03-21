@@ -5,9 +5,9 @@
   "description": "PromptFarm monorepo workspace",
   "packageManager": "pnpm@9.0.0",
   "scripts": {
-    "build": "npm --prefix packages/core run build && npm --prefix packages/cli run build",
-    "typecheck": "npm --prefix packages/core run typecheck && npm --prefix packages/cli run typecheck && npx tsc --noEmit",
-    "test": "npm --prefix packages/core run test && npm --prefix packages/cli run test",
+    "build": "npm --prefix packages/core run build && npm --prefix packages/cli run build && npm --prefix packages/crawler-core run build && npm --prefix packages/crawler-cli run build",
+    "typecheck": "npm --prefix packages/core run typecheck && npm --prefix packages/cli run typecheck && npm --prefix packages/crawler-core run typecheck && npm --prefix packages/crawler-cli run typecheck && npx tsc --noEmit",
+    "test": "npm --prefix packages/core run test && npm --prefix packages/cli run test && npm --prefix packages/crawler-core run test",
     "serve": "npm --prefix packages/cli run serve",
     "validate": "node bin/promptfarm.cjs validate",
     "resolve": "node bin/promptfarm.cjs resolve",

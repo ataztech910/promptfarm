@@ -25,6 +25,7 @@
     "test:runtime-polish": "node --import tsx --test src/commands/resolve.integration.test.ts src/commands/doctor.integration.test.ts"
   },
   "dependencies": {
+    "@promptfarm/crawler-core": "workspace:*",
     "@promptfarm/core": "workspace:*",
     "commander": "^12.0.0"
   },

@@ -1,0 +1,27 @@
+{
+  "name": "@promptfarm/crawler-cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "promptfarm-crawler": "./dist/index.cjs"
+  },
+  "scripts": {
+    "precrawl": "npm --prefix ../crawler-core run build",
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "crawl": "tsx src/main.ts crawl"
+  },
+  "dependencies": {
+    "@promptfarm/crawler-core": "workspace:*",
+    "commander": "^12.0.0",
+    "yaml": "^2.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsup": "^8.5.1",
+    "tsx": "^4.16.2",
+    "typescript": "^5.5.0"
+  },
+  "license": "PolyForm-Noncommercial-1.0.0"
+}

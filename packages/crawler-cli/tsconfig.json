@@ -4,8 +4,6 @@
     "outDir": "dist",
     "baseUrl": ".",
     "paths": {
-      "@promptfarm/core": ["../core/src/index.ts"],
-      "@promptfarm/core/node": ["../core/src/node.ts"],
       "@promptfarm/crawler-core": ["../crawler-core/src/index.ts"]
     }
   },

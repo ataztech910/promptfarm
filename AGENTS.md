@@ -1,4 +1,4 @@
-# AI Agent Instructions
+## AI Agent Instructions
 
 This project uses structured system context located in:
 

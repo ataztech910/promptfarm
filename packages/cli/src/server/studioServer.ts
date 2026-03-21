@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import path from "node:path";
 import { URL } from "node:url";
+import { crawlSite, FetchPageLoader } from "@promptfarm/crawler-core";
 import type { StudioExecutionService, StudioServerExecutionRequest } from "./studioExecutionService.js";
 import {
   StudioAuthServiceAuthenticationError,
@@ -476,143 +477,40 @@ async function discoverUrlImport(input: {
   maxPages?: number;
   scope?: StudioUrlImportScope;
 }): Promise<StudioUrlImportDiscoveryPayload> {
-  const requestedUrl = typeof input.url === "string" ? input.url.trim() : "";
-  if (requestedUrl.length === 0) {
-    throw new Error("URL import request must include a non-empty url.");
-  }
-
-  let normalizedUrl: URL;
-  try {
-    normalizedUrl = new URL(requestedUrl);
-  } catch {
-    throw new Error(`Invalid URL: ${requestedUrl}`);
-  }
-
-  if (!["http:", "https:"].includes(normalizedUrl.protocol)) {
-    throw new Error("Only http and https URLs are supported.");
-  }
-
-  const maxPages = Math.min(Math.max(Number(input.maxPages ?? 12), 1), 100);
-  const scope: StudioUrlImportScope =
-    input.scope === "single_page" || input.scope === "site" || input.scope === "section" ? input.scope : "section";
-  const root = await fetchDocumentSummary({
-    url: normalizedUrl.toString(),
-    source: "root",
-  });
-
-  const pages: StudioUrlImportPageSummary[] = [root.page];
-  let diagnostics = createUrlImportDiagnostics(scope, maxPages, new URL(root.finalUrl).pathname);
-  if (root.page.status !== "ready") {
-    throw new Error(root.page.error ?? `Failed to load ${requestedUrl}.`);
-  }
-
-  let truncated = false;
-  const rootUrl = root.finalUrl;
-  const queue: string[] = [];
-  const seen = new Set<string>([root.finalUrl]);
-  let effectiveScopeUrl = root.finalUrl;
-
-  if (scope !== "single_page" && root.html) {
-    let discovery = extractDocumentLinks({
-      html: root.html,
-      baseUrl: root.finalUrl,
-      scopeUrl: effectiveScopeUrl,
-      scope,
-      remainingCapacity: Math.max(maxPages - seen.size, 0),
-      seen,
-    });
-    if (scope === "section" && discovery.urls.length === 0) {
-      let fallbackPath = getParentSectionPathname(new URL(root.finalUrl).pathname);
-      while (fallbackPath) {
-        const fallbackUrl = new URL(root.finalUrl);
-        fallbackUrl.pathname = fallbackPath;
-        fallbackUrl.search = "";
-        fallbackUrl.hash = "";
-        const fallbackSeen = new Set<string>([root.finalUrl]);
-        const fallbackDiscovery = extractDocumentLinks({
-          html: root.html,
-          baseUrl: root.finalUrl,
-          scopeUrl: fallbackUrl.toString(),
-          scope,
-          remainingCapacity: Math.max(maxPages - fallbackSeen.size, 0),
-          seen: fallbackSeen,
-        });
-        if (fallbackDiscovery.urls.length > 0) {
-          effectiveScopeUrl = fallbackUrl.toString();
-          discovery = fallbackDiscovery;
-          seen.clear();
-          for (const item of fallbackSeen) {
-            seen.add(item);
-          }
-          break;
-        }
-        fallbackPath = getParentSectionPathname(fallbackPath);
-      }
-    }
-    diagnostics = mergeUrlImportDiagnostics(diagnostics, {
-      scopeRoot: discovery.diagnostics.scopeRoot,
-      scannedPages: 1,
-      rawLinksSeen: discovery.diagnostics.rawLinksSeen,
-      acceptedLinks: discovery.diagnostics.acceptedLinks,
-      rejectedExternal: discovery.diagnostics.rejectedExternal,
-      rejectedOutOfScope: discovery.diagnostics.rejectedOutOfScope,
-      rejectedNonDocument: discovery.diagnostics.rejectedNonDocument,
-      rejectedDuplicate: discovery.diagnostics.rejectedDuplicate,
-    });
-    queue.push(...discovery.urls);
-    truncated ||= discovery.truncated;
-  } else if (root.html) {
-    diagnostics = mergeUrlImportDiagnostics(diagnostics, {
-      scannedPages: 1,
-    });
-  }
-
-  while (queue.length > 0 && pages.length < maxPages) {
-    const nextUrl = queue.shift();
-    if (!nextUrl) {
-      continue;
-    }
-
-    const result = await fetchDocumentSummary({
-      url: nextUrl,
-      source: "linked",
-    });
-    pages.push(result.page);
-
-    if (result.page.status !== "ready" || !result.html || scope === "single_page" || pages.length >= maxPages) {
-      continue;
-    }
-
-    const discovery = extractDocumentLinks({
-      html: result.html,
-      baseUrl: result.finalUrl,
-      scopeUrl: effectiveScopeUrl,
-      scope,
-      remainingCapacity: Math.max(maxPages - seen.size, 0),
-      seen,
-    });
-    diagnostics = mergeUrlImportDiagnostics(diagnostics, {
-      scopeRoot: discovery.diagnostics.scopeRoot,
-      scannedPages: 1,
-      rawLinksSeen: discovery.diagnostics.rawLinksSeen,
-      acceptedLinks: discovery.diagnostics.acceptedLinks,
-      rejectedExternal: discovery.diagnostics.rejectedExternal,
-      rejectedOutOfScope: discovery.diagnostics.rejectedOutOfScope,
-      rejectedNonDocument: discovery.diagnostics.rejectedNonDocument,
-      rejectedDuplicate: discovery.diagnostics.rejectedDuplicate,
-    });
-    queue.push(...discovery.urls);
-    truncated ||= discovery.truncated;
-  }
+  const discovery = await crawlSite(
+    {
+      url: input.url,
+      ...(typeof input.maxPages === "number" ? { maxPages: input.maxPages } : {}),
+      ...(input.scope ? { scope: input.scope } : {}),
+    },
+    {
+      pageLoader: new FetchPageLoader({
+        timeoutMs: 8000,
+        userAgent: "PromptFarm Studio URL Import/0.1",
+        acceptHeader: "text/html, text/plain;q=0.9",
+      }),
+    },
+  );
 
   return {
-    requestedUrl,
-    finalUrl: root.finalUrl,
-    title: root.page.title,
-    discoveredPageCount: pages.length + (truncated ? 1 : 0),
-    truncated,
-    pages,
-    diagnostics,
+    requestedUrl: discovery.requestedUrl,
+    finalUrl: discovery.finalUrl,
+    title: discovery.title,
+    discoveredPageCount: discovery.discoveredPageCount,
+    truncated: discovery.truncated,
+    pages: discovery.pages,
+    diagnostics: {
+      mode: discovery.diagnostics.mode,
+      maxPages: discovery.diagnostics.maxPages,
+      scopeRoot: discovery.diagnostics.scopeRoot,
+      scannedPages: discovery.diagnostics.scannedPages,
+      rawLinksSeen: discovery.diagnostics.rawLinksSeen,
+      acceptedLinks: discovery.diagnostics.acceptedLinks,
+      rejectedExternal: discovery.diagnostics.rejectedExternal,
+      rejectedOutOfScope: discovery.diagnostics.rejectedOutOfScope,
+      rejectedNonDocument: discovery.diagnostics.rejectedNonDocument,
+      rejectedDuplicate: discovery.diagnostics.rejectedDuplicate,
+    },
   };
 }
 
